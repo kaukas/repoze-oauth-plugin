@@ -19,7 +19,7 @@ class OAuthPlugin(object):
 
     def __init__(self, DBSession,
             Manager=DefaultManager,
-            realm=None,
+            realm='',
             # Reserved for 3 legs
             #url_request_token='/oauth/request_token',
             #url_authorize='/oauth/authorize',
