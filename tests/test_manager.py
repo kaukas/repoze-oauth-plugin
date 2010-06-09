@@ -1,17 +1,22 @@
 
-from base import ManagerTester
+from .base import ManagerTester
 
 
-class TestOAuthConsumerManager(ManagerTester):
-
+class TestOAuthDefaultManager(ManagerTester):
 
     def test_consumer_manager(self):
-        from repoze.who.plugins.oauth import ConsumerManager
-        cm = ConsumerManager(metadata=self.metadata, DBSession=self.session)
-        self.assertEquals(cm.get_by_key('abcd'), None)
+        from repoze.who.plugins.oauth import DefaultManager, Consumer
+        cm = DefaultManager(DBSession=self.session)
+
+        # Consumer exists not
+        self.assertEquals(cm.get_consumer_by_key('abcd'), None)
         
-        consumer = cm.Consumer(key='abcd', secret='abcdef')
+        # Create him
+        consumer = Consumer(key='abcd', secret='abcdef')
         self.session.add(consumer)
         self.session.flush()
 
-        self.assertEquals(cm.get_by_key('abcd'), consumer)
+        # Consumer exists
+        self.assertEquals(cm.get_consumer_by_key('abcd'), consumer)
+        # Consumer exists not
+        self.assertEquals(cm.get_consumer_by_key('abdc'), None)

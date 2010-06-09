@@ -3,35 +3,35 @@ from StringIO import StringIO
 
 import oauth2
 
-from base import ManagerTester
+from .base import ManagerTester
 
 
 class TestOAuthPlugin(ManagerTester):
-    def _getTargetClass(self):
-        from repoze.who.plugins.oauth import OAuthPlugin
-        return OAuthPlugin
-
-    def _makeOne(self, *args, **kargs):
-        plugin = self._getTargetClass()(*args, **kargs)
-        return plugin
-
-    def _makeEnviron(self, kargs=None):
-        environ = {}
-        environ['wsgi.version'] = (1, 0)
-        if kargs is not None:
-            environ.update(kargs)
-        return environ
-
     def test_implements(self):
         from zope.interface.verify import verifyClass
-        from repoze.who.interfaces import IIdentifier, IAuthenticator
+        from repoze.who.interfaces import (IIdentifier, IAuthenticator,
+            IChallenger)
 
         cls = self._getTargetClass()
-        verifyClass(IAuthenticator, cls)
         verifyClass(IIdentifier, cls)
+        verifyClass(IAuthenticator, cls)
+        verifyClass(IChallenger, cls)
+
 
     def test_init(self):
+        from repoze.who.plugins.oauth.managers import DefaultManager
+
         plugin = self._makeOne()
+        self.assertTrue(isinstance(plugin.manager, DefaultManager))
+
+        # Assume configuration with entry points
+        plugin = self._makeOne(
+            Manager='repoze.who.plugins.oauth:DefaultManager')
+        self.assertTrue(isinstance(plugin.manager, DefaultManager))
+
+        plugin = self._makeOne(DBSession='tests.base:DBSession')
+        self.assertEquals(plugin.manager.DBSession, self.session)
+
 
     def test_parse_params(self):
         plugin = self._makeOne()
@@ -65,7 +65,7 @@ class TestOAuthPlugin(ManagerTester):
 
         pstr = ', '.join(['%s="%s"' % (k, v) for k, v in params])
         environ = self._makeEnviron({
-            'REQUEST_METHOD': 'POST',
+            'REQUEST_METHOD': 'GET',
             'wsgi.input': StringIO(),
             'QUERY_STRING': '',
             'HTTP_AUTHORIZATION': 'OAuth ' + pstr
@@ -73,7 +73,8 @@ class TestOAuthPlugin(ManagerTester):
         # Realm is stripped if it comes through the authorization header
         self.assertEquals(plugin._parse_params(environ), dict(params[1:]))
 
-    def test_request_token_authenticator(self):
+
+    def test_authenticator(self):
         plugin = self._makeOne()
         std_env_params = {
             'wsgi.url_scheme': 'http',
@@ -85,8 +86,13 @@ class TestOAuthPlugin(ManagerTester):
             'wsgi.input': '',
         }
 
+        # Create one consumer in our DB
+        from repoze.who.plugins.oauth.model import Consumer
+        self.session.add(Consumer(key='cons1', secret='secret1'))
+        self.session.flush()
+
         # Construct a nice request and pass the authenticator check
-        consumer = oauth2.Consumer('consumer_key', 'secret')
+        consumer = oauth2.Consumer('cons1', 'secret1')
         req = oauth2.Request.from_consumer_and_token(
             consumer=consumer,
             token=None,
@@ -100,7 +106,9 @@ class TestOAuthPlugin(ManagerTester):
         environ = self._makeEnviron(env_params)
         identity = plugin.identify(environ)
         userid = plugin.authenticate(environ, identity)
-        self.assertEquals(userid, consumer.key)
+        # The repoze.who.userid remains empty
+        self.assertEquals(userid, '')
+        self.assertEquals(identity['repoze.who.consumerkey'], consumer.key)
 
         # Now tweak some parameters and see how authenticator rejects the
         # consumer
@@ -131,3 +139,31 @@ class TestOAuthPlugin(ManagerTester):
         identity = plugin.identify(environ)
         self.assertEquals(plugin.authenticate(environ, identity), None)
         req['oauth_signature'] = good_signature
+
+        # Bad consumer key - consumer not found
+        good_consumer_key = req['oauth_consumer_key']
+        req['oauth_consumer_key'] = good_consumer_key[:-2]
+        env_params = {'HTTP_AUTHORIZATION': req.to_header()['Authorization']}
+        env_params.update(std_env_params)
+        environ = self._makeEnviron(env_params)
+        identity = plugin.identify(environ)
+        self.assertEquals(plugin.authenticate(environ, identity), None)
+        req['oauth_consumer_key'] = good_consumer_key
+
+        # Now test a GET request
+        req = oauth2.Request.from_consumer_and_token(
+            consumer=consumer,
+            token=None,
+            http_method='GET',
+            http_url='http://www.example.com/oauth/request_token')
+        req.sign_request(signature_method=oauth2.SignatureMethod_HMAC_SHA1(),
+            consumer=consumer, token=None)
+
+        env_params = {'HTTP_AUTHORIZATION': req.to_header()['Authorization']}
+        env_params.update(std_env_params)
+        env_params['REQUEST_METHOD'] = 'GET'
+        environ = self._makeEnviron(env_params)
+        identity = plugin.identify(environ)
+        userid = plugin.authenticate(environ, identity)
+        self.assertEquals(identity['consumer'].key, consumer.key)
+
