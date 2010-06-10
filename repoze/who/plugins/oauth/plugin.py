@@ -145,8 +145,9 @@ class OAuthPlugin(object):
         #    environ['repoze.who.application'] = \
         #        self._make_request_token_app(consumer)
 
-        # Return '' for userid as we only have a consumer here
-        return ''
+        # Return 'consumer:key' as we want to be sure it will not be found among
+        # simple users
+        return 'consumer:%s' % consumer.key
 
 
     # IChallenger

@@ -6,12 +6,12 @@ from paste.httpexceptions import HTTPUnauthorized
 from paste.httpheaders import WWW_AUTHENTICATE
 from repoze.who.classifiers import (default_request_classifier,
     default_challenge_decider)
-from repoze.who.middleware import PluggableAuthenticationMiddleware
+from repoze.what.middleware import setup_auth
 
 from .base import ManagerTester
 
 from repoze.who.plugins.oauth.model import Consumer
-from repoze.what.plugins.oauth import is_consumer
+from repoze.what.plugins.oauth import is_consumer, not_oauth
 
 
 class DemoApp(object):
@@ -20,6 +20,8 @@ class DemoApp(object):
             return self.secret_for_all(environ, start_response)
         elif environ.get('PATH_INFO') == '/secret-for-app1':
             return self.secret_for_app1(environ, start_response)
+        elif environ.get('PATH_INFO') == '/secret-for-others':
+            return self.secret_for_others(environ, start_response)
 
     def secret_for_all(self, environ, start_response):
         if not is_consumer().is_met(environ):
@@ -35,6 +37,13 @@ class DemoApp(object):
         start_response('200 OK', [('Content-Type', 'text/plain')])
         return ['This is a secret for app1 only']
         
+    def secret_for_others(self, environ, start_response):
+        if not not_oauth().is_met(environ):
+            start_response('401 ', [('Content-Type', 'text/plain')])
+            return HTTPUnauthorized()
+        start_response('200 OK', [('Content-Type', 'text/plain')])
+        return ['This is for all except oauth']
+
 
 
 class TestOAuthFullStack(ManagerTester):
@@ -44,14 +53,10 @@ class TestOAuthFullStack(ManagerTester):
         app = DemoApp()
 
         # Apply repoze on top
-        app = PluggableAuthenticationMiddleware(app,
+        app = setup_auth(app, group_adapters=None, permission_adapters=None,
             identifiers=[('oauth', self.plugin)],
             authenticators=[('oauth', self.plugin)],
-            challengers=[('oauth', self.plugin)],
-            mdproviders=[],
-            classifier=default_request_classifier,
-            challenge_decider=default_challenge_decider
-        )
+            challengers=[('oauth', self.plugin)])
 
         self.app = TestApp(app)
         return self.app
@@ -84,7 +89,7 @@ class TestOAuthFullStack(ManagerTester):
         self.assertEquals(self.plugin.manager.get_consumer_by_key('app').key,
             consumer.key)
 
-        res = app.get(o_req.url, expect_errors=True, headers=o_req.to_header())
+        res = app.get(o_req.url, headers=o_req.to_header())
         # Here we go - the resource we wanted so much
         self.assertTrue('This is a secret for all to see' in res)
 
@@ -117,5 +122,24 @@ class TestOAuthFullStack(ManagerTester):
         o_req = oauth.Request.from_consumer_and_token(consumer1, token=None,
             http_method='GET', http_url='http://localhost/secret-for-app1')
         o_req.sign_request(oauth.SignatureMethod_HMAC_SHA1(), consumer1, None)
-        res = app.get(o_req.url, expect_errors=True, headers=o_req.to_header())
+        res = app.get(o_req.url, headers=o_req.to_header())
         self.assertTrue('This is a secret for app1 only' in res)
+
+        # We should not be able to access not_oauth protected resource neither
+        # with consumer1...
+        o_req = oauth.Request.from_consumer_and_token(consumer1, token=None,
+            http_method='GET', http_url='http://localhost/secret-for-others')
+        o_req.sign_request(oauth.SignatureMethod_HMAC_SHA1(), consumer1, None)
+        res = app.get(o_req.url, expect_errors=True, headers=o_req.to_header())
+        self.assertTrue('401 Unauthorized' in res)
+
+        # nor with consumer...
+        o_req = oauth.Request.from_consumer_and_token(consumer, token=None,
+            http_method='GET', http_url='http://localhost/secret-for-others')
+        o_req.sign_request(oauth.SignatureMethod_HMAC_SHA1(), consumer, None)
+        res = app.get(o_req.url, expect_errors=True, headers=o_req.to_header())
+        self.assertTrue('401 Unauthorized' in res)
+
+        # However, a simple unauthenticated request will do
+        res = app.get(o_req.url)
+        self.assertTrue('This is for all except oauth' in res)

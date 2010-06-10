@@ -106,8 +106,9 @@ class TestOAuthPlugin(ManagerTester):
         environ = self._makeEnviron(env_params)
         identity = plugin.identify(environ)
         userid = plugin.authenticate(environ, identity)
-        # The repoze.who.userid remains empty
-        self.assertEquals(userid, '')
+        # The repoze.who.userid contains the key of the consumer, so does
+        # repoze.who.consumerkey
+        self.assertEquals(userid, 'consumer:%s' % consumer.key)
         self.assertEquals(identity['repoze.who.consumerkey'], consumer.key)
 
         # Now tweak some parameters and see how authenticator rejects the
@@ -128,6 +129,7 @@ class TestOAuthPlugin(ManagerTester):
         environ = self._makeEnviron(env_params)
         identity = plugin.identify(environ)
         self.assertEquals(plugin.authenticate(environ, identity), None)
+        # Restore the good timestamp
         req['oauth_timestamp'] = good_tstamp
 
         # Bad signature
@@ -138,6 +140,7 @@ class TestOAuthPlugin(ManagerTester):
         environ = self._makeEnviron(env_params)
         identity = plugin.identify(environ)
         self.assertEquals(plugin.authenticate(environ, identity), None)
+        # Restore the good signature
         req['oauth_signature'] = good_signature
 
         # Bad consumer key - consumer not found
@@ -148,6 +151,7 @@ class TestOAuthPlugin(ManagerTester):
         environ = self._makeEnviron(env_params)
         identity = plugin.identify(environ)
         self.assertEquals(plugin.authenticate(environ, identity), None)
+        # Restore the good consumer key
         req['oauth_consumer_key'] = good_consumer_key
 
         # Now test a GET request

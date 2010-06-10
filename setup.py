@@ -1,14 +1,14 @@
 # -*- coding: UTF-8 -*-
 
 from setuptools import setup, find_packages
-import sys, os
+import os.path
+import sys
 
 version = '0.1'
 
 setup(name='repoze-oauth-plugin',
     version=version,
     description='OAuth plugin for repoze.who and repoze.what',
-    #long_description=open('README.txt').read(),
     classifiers=[], # Get strings from http://pypi.python.org/pypi?%3Aaction=list_classifiers
     keywords='auth repoze repoze.who repoze.what predicate oauth',
     author=u'Linas Juškevičius'.encode('utf-8'),
