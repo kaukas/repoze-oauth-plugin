@@ -114,17 +114,17 @@ Pylons setup
 ------------
 
 The following is an example setup for a Pylons application. Let's assume it is
-called RepozeTest. We'll use repoze.what-quickstart_ and repoze.what-pylons_::
+called ExampleApp. We'll use repoze.what-quickstart_ and repoze.what-pylons_::
 
     $ <env>/bin/pip install repoze.what-quickstart repoze.what-pylons
 
-First, in your `repozetest/config/middleware.py` file define imports::
+First, in your `exampleapp/config/middleware.py` file define imports::
 
     from repoze.what.plugins.quickstart import setup_sql_auth
     from repoze.who.plugins.oauth import OAuthPlugin
 
-    from repozetest.model import User, Group, Permission
-    from repozetest.model.meta import Session
+    from exampleapp.model import User, Group, Permission
+    from exampleapp.model.meta import Session
 
 then just below::
 
@@ -133,7 +133,7 @@ then just below::
 
 create the repoze-oauth-plugin and provide a realm and SQLAlchemy session::
 
-    oauth_plugin = OAuthPlugin(realm='repozetest', DBSession=Session)
+    oauth_plugin = OAuthPlugin(realm='exampleapp', DBSession=Session)
     app = setup_sql_auth(app, User, Group, Permission, Session,
         identifiers=[('oauth', oauth_plugin)],
         authenticators=[('oauth', oauth_plugin)],
@@ -144,7 +144,7 @@ has to return a `WWW-Authenticate: OAuth realm="..."` header. Pylons
 `StatusCodeRedirect` middleware replaces the `401` response with its own custom
 `401` response discarding even the headers set by the downstream application. In
 order to avoid this StatusCodeRedirect can be configured to not intercept the
-`401` response. In `middleware.py` replace::
+`401` response. In `exampleapp/config/middleware.py` replace::
 
     # Display error documents for 401, 403, 404 status codes (and
     # 500 when debug is disabled)
@@ -168,7 +168,7 @@ environment whenever successful authentication happens.
 In order to be sure that only valid consumers can access your controllers and
 actions you have to protect them with repoze.what-pylons predicates::
 
-    # repozetest/controllers/cars.py
+    # exampleapp/controllers/cars.py
     ...
     from repoze.what.plugins.pylonshq import ActionProtector
     from repoze.what.plugins.oauth import is_consumer, not_oauth
@@ -184,7 +184,7 @@ actions you have to protect them with repoze.what-pylons predicates::
             return 'Not for consumer'
 
 
-    # repozetest/controllers/trucks.py
+    # exampleapp/controllers/trucks.py
     ...
     from repoze.what.plugins.pylonshq import ControllerProtector
     from repoze.what.plugins.oauth import is_consumer
