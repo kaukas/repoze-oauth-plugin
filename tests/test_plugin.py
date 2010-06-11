@@ -74,13 +74,13 @@ class TestOAuthPlugin(ManagerTester):
         self.assertEquals(plugin._parse_params(environ), dict(params[1:]))
 
 
-    def test_authenticator(self):
+    def test_2_legged_flow(self):
         plugin = self._makeOne()
         std_env_params = {
             'wsgi.url_scheme': 'http',
             'SERVER_NAME': 'www.example.com',
             'SERVER_PORT': '80',
-            'PATH_INFO': '/oauth/request_token',
+            'PATH_INFO': '/get_some_resource',
             'REQUEST_METHOD': 'POST',
             'QUERY_STRING': '',
             'wsgi.input': '',
@@ -97,7 +97,7 @@ class TestOAuthPlugin(ManagerTester):
             consumer=consumer,
             token=None,
             http_method='POST',
-            http_url='http://www.example.com/oauth/request_token')
+            http_url='http://www.example.com/get_some_resource')
         req.sign_request(signature_method=oauth2.SignatureMethod_HMAC_SHA1(),
             consumer=consumer, token=None)
 
@@ -159,7 +159,7 @@ class TestOAuthPlugin(ManagerTester):
             consumer=consumer,
             token=None,
             http_method='GET',
-            http_url='http://www.example.com/oauth/request_token')
+            http_url='http://www.example.com/get_some_resource')
         req.sign_request(signature_method=oauth2.SignatureMethod_HMAC_SHA1(),
             consumer=consumer, token=None)
 
@@ -170,4 +170,35 @@ class TestOAuthPlugin(ManagerTester):
         identity = plugin.identify(environ)
         userid = plugin.authenticate(environ, identity)
         self.assertEquals(identity['consumer'].key, consumer.key)
+
+        # Cleanup consumers
+        self.session.execute(Consumer.__table__.delete())
+
+
+    def test_3_legged_flow(self):
+        plugin = self._makeOne()
+        std_env_params = {
+            'wsgi.url_scheme': 'http',
+            'SERVER_NAME': 'www.example.com',
+            'SERVER_PORT': '80',
+            'PATH_INFO': '/oauth/request_token',
+            'REQUEST_METHOD': 'POST',
+            'QUERY_STRING': '',
+            'wsgi.input': '',
+        }
+
+        # Create one consumer in our DB
+        from repoze.who.plugins.oauth.model import Consumer
+        self.session.add(Consumer(key='cons1', secret='secret1'))
+        self.session.flush()
+
+        # Construct a nice request and try to pass the authenticator check
+        consumer = oauth2.Consumer('cons1', 'secret1')
+        req = oauth2.Request.from_consumer_and_token(
+            consumer=consumer,
+            token=None,
+            http_method='POST',
+            http_url='http://www.example.com/get_some_resource')
+        req.sign_request(signature_method=oauth2.SignatureMethod_HMAC_SHA1(),
+            consumer=consumer, token=None)
 
