@@ -6,7 +6,7 @@ import sys
 # Fool distutils to accept more than ASCII
 reload(sys).setdefaultencoding('utf-8')
 
-version = '0.1'
+version = '0.1.1'
 
 setup(name='repoze-oauth-plugin',
     version=version,
@@ -27,6 +27,7 @@ setup(name='repoze-oauth-plugin',
         'repoze.who==1.0.18',
         'repoze.what>=1.0.9',
         'oauth2>=1.2.0',
+        'SQLAlchemy>=0.5.5',
     ],
     tests_require=[
         'nose',
