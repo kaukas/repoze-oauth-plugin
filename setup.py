@@ -31,6 +31,5 @@ setup(name='repoze-oauth-plugin',
     ],
     tests_require=[
         'nose',
-        'PasteDeploy>=1.3.3',
     ],
 )

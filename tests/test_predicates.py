@@ -1,13 +1,17 @@
-import unittest
+from urllib import urlencode
 
 from repoze.what import predicates
 
-from repoze.what.plugins.oauth import is_consumer, not_oauth
+from repoze.what.plugins.oauth import (is_consumer, not_oauth,
+    token_authorization)
+from repoze.who.plugins.oauth import DefaultManager, Consumer, RequestToken
+
+from .base import ManagerTester
 
 
 # From repoze.what tests
 
-class BasePredicateTester(unittest.TestCase):
+class BasePredicateTester(ManagerTester):
     """Base test case for predicates."""
     
     def eval_met_predicate(self, p, environ):
@@ -31,6 +35,7 @@ class BasePredicateTester(unittest.TestCase):
     def _make_environ(self):
         """Make a WSGI enviroment with the credentials dict"""
         environ = {
+            'REQUEST_METHOD': 'GET',
             'repoze.who.identity': {
                 #'repoze.who.userid': None
             },
@@ -105,3 +110,46 @@ class TestNotOAuth(BasePredicateTester):
         env['repoze.who.identity']['repoze.who.userid'] = 'Some User'
         p = not_oauth()
         self.eval_met_predicate(p, env)
+
+
+class TestTokenAuthorization(BasePredicateTester):
+
+    def test_get_request(self):
+        env = self._make_environ()
+        p = token_authorization(self.session)
+
+        # First try an empty environment
+        self.eval_unmet_predicate(p, env, 'No valid matching OAuth token found')
+
+        # Then try a non-existing token
+        env['QUERY_STRING'] = urlencode(dict(oauth_token='some-token'))
+        self.eval_unmet_predicate(p, env, 'No valid matching OAuth token found')
+        # There is no token in the environment
+        self.assertFalse(env['oauth'].get('token'))
+        
+        # Now create a consumer and the token and try again
+        consumer = Consumer(key='some-consumer', secret='some-secret')
+        token = RequestToken.create(consumer, session=self.session,
+            key='some-token',
+            callback=u'http://www.test.com/some/path?x=1&y=%20a')
+        self.session.add(consumer)
+        self.session.flush()
+        self.eval_met_predicate(p, env)
+
+        # Environment now contains a token which was found according to the
+        # query string
+        self.assertEquals(env['oauth']['token'], token)
+
+        # Now construct a POST query and expect to find a callback function to
+        # authorize the request token
+        env = self._make_environ()
+        env['REQUEST_METHOD'] = 'POST'
+        self.eval_met_predicate(p, env)
+        callback_maker = env['oauth']['make_callback']
+        self.assertTrue(callback_maker)
+        
+        # We must provide a request token key and a userid to authorize a
+        # request callback
+        callback = callback_maker('some-token', u'some-user')
+        self.assertEquals(len(callback['verifier']), 6)
+        self.assertTrue(callback['verifier'] in callback['url'])

@@ -30,8 +30,8 @@ class OAuthPlugin(object):
         })
 
         self.urls = dict(
-            request_token=url_request_token,
-            access_token=url_access_token)
+            request=url_request_token,
+            access=url_access_token)
 
         # Allow session to be provided as an entry point from config
         if isinstance(DBSession, (str, unicode)):
@@ -62,12 +62,12 @@ class OAuthPlugin(object):
 
         return dict(params)
 
-    def _request(self, consumer, environ, params):
-        req = oauth2.Request(
-            method=environ['REQUEST_METHOD'],
-            url=construct_url(environ, with_query_string=False),
-            parameters=params)
-        return req
+    #def _request(self, consumer, environ, params):
+    #    req = oauth2.Request(
+    #        method=environ['REQUEST_METHOD'],
+    #        url=construct_url(environ, with_query_string=False),
+    #        parameters=params)
+    #    return req
 
 
     # IIdentifier
@@ -86,109 +86,289 @@ class OAuthPlugin(object):
         return None
 
 
-    def _is_token_query(self, environ):
-        return environ['PATH_INFO'] in self.urls.values()
+    #def _is_request_token_query(self, environ, identity):
+    #    return (environ['PATH_INFO'] == self.urls['request']) and \
+    #        (not identity.get('oauth_token') or not
+    #        identity.get('oauth_verifier'))
 
-    def _make_unauth_app_setter(self, environ):
-        # If this is not a token management url...
-        if not self._is_token_query(environ):
-            # ... we don't care
-            return lambda: None
-        # ... otherwise we prepare the unauthorized application which will be
-        # needed in case the request fails due to wrong parameters or anything
-        # else
-        def set_unauth_app():
-            # repoze will replace the downstream app with what we set in
-            # repoze.who.application. This is a standard way to replace the
-            # downstream app for the IAuthenticators
-            environ['repoze.who.application'] = HTTPUnauthorized()
-        return set_unauth_app
-        
-    def _make_token_app_setter(self, environ, consumer):
-        # If this is not a token management url...
-        if not self._is_token_query(environ):
-            # ... we don't care
-            return lambda: None
+    #def _is_access_token_query(self, environ, identity):
+    #    return environ['PATH_INFO'] == self.urls['access'] and \
+    #        identity.get('oauth_token') and identity.get('oauth_verifier')
 
-        # ... otherwise we prepare the token management apps
+    #def _is_token_query(self, environ):
+    #    return environ['PATH_INFO'] in self.urls.values()
+
+
+    # Cook an unauthorized application to indicate wrong parameters or other
+    # invalid condition
+    def _set_unauth_app(self, environ):
+        # repoze will replace the downstream app with what we set in
+        # repoze.who.application. This is a standard way to replace the
+        # downstream app for the IAuthenticators
+        environ['repoze.who.application'] = HTTPUnauthorized()
+
+    #def _make_token_app_setter(self, environ, identity, consumer, rtoken):
+    #    # If this is not a token management url...
+    #    if not self._is_token_query(environ):
+    #        # ... we don't care
+    #        return
+
+    #    # ... otherwise we prepare the token management apps
+    #    if self._is_request_token_query(environ, identity):
+    #        # An app that creates and returns a request token
+    #        def token_app(environ, start_response):
+    #            token = self.manager.create_request_token(consumer,
+    #                identity['oauth_callback'])
+    #            start_response('200 OK', [
+    #                ('Content-Type', 'application/x-www-form-urlencoded')
+    #            ])
+    #            return [urlencode(dict(
+    #                oauth_token=token.key,
+    #                oauth_token_secret=token.secret,
+    #                oauth_callback_confirmed='true'))]
+
+    #    elif self._is_access_token_query(environ, identity):
+    #        # An app that creates and returns an access token
+    #        def token_app(environ, start_response):
+    #            atoken = self.manager.make_access_token(rtoken)
+    #            start_response('200 OK', [
+    #                ('Content-Type', 'application/x-www-form-urlencoded')
+    #            ])
+    #            return [urlencode(dict(
+    #                oauth_token=atoken.key,
+    #                oauth_token_secret=atoken.secret))]
+
+    #    # The user requested one of the token management URLs so we have to
+    #    # replace the downstream app with our own app which creates and returns
+    #    # appropriate tokens
+    #    def set_token_app():
+    #        environ['repoze.who.application'] = token_app
+    #    return set_token_app
+
+    def _detect_flow(self, environ, identity):
         path = environ['PATH_INFO']
-        if path == self.urls['request_token']:
-            # An app that creates and returns a request token
-            def token_app(environ, start_response):
-                token, secret = self._create_request_token(consumer)
-                start_response('200 OK', [
-                    ('Content-Type', 'application/x-www-form-urlencoded')
-                ])
-                return urlencode(dict(
-                    oauth_token='some_token',
-                    oauth_token_secret='some_token_secret'))
+        if path == self.urls['request']:
+            if path == self.urls['access'] and 'oauth_token' in identity:
+                return 'access-token'
+            return 'request-token'
+        if path == self.urls['access']:
+            return 'access-token'
+        if identity and not filter(lambda k: not k.startswith('oauth_'),
+            identity.keys()):
+            if 'oauth_token' in identity:
+                return '3-legged'
+            return '2-legged'
+        return 'non-oauth'
 
-        elif path == self.urls['access_token']:
-            # An app that creates and returns an access token
-            def token_app(environ, start_response):
-                token, secret = self._create_request_token(consumer)
-                start_response('200 OK', [
-                    ('Content-Type', 'application/x-www-form-urlencoded')
-                ])
-                return urlencode(dict(
-                    oauth_token='some_token',
-                    oauth_token_secret='some_token_secret'))
+    def _check_POST(self, env):
+        if env['environ']['REQUEST_METHOD'].upper() != 'POST':
+            self._set_unauth_app(env['environ'])
+            return False
+        return True
 
-        # The user requested one of the token management URLs so we have to
-        # replace the downstream app with our own app which creates and returns
-        # appropriate tokens
-        def set_token_app():
-            environ['repoze.who.application'] = token_app
-        return set_token_app
+    def _check_oauth_params(self, env):
+        identity = env['identity']
+        if filter(lambda k: not k.startswith('oauth_'), identity.keys()):
+            # There are keys not from oauth - probably not our credentials
+            return False
+        return True
+
+    def _check_callback(self, env):
+        if not env['identity'].get('oauth_callback'):
+            self._set_unauth_app(env['environ'])
+            return False
+        return True
+
+    def _get_consumer(self, env):
+        consumer = self.manager.get_consumer_by_key(
+            env['identity'].get('oauth_consumer_key'))
+        if consumer:
+            env['consumer'] = consumer
+            return True
+        self._set_unauth_app(env['environ'])
+        return False
+
+    def _get_request_token(self, env):
+        token_key = env['identity'].get('oauth_token')
+        verifier = env['identity'].get('oauth_verifier')
+        token = self.manager.get_request_token(token_key)
+        if token and verifier and token.verifier == verifier:
+            env['token'] = token
+            return True
+        self._set_unauth_app(env['environ'])
+        return False
+    
+    def _get_access_token(self, env):
+        token_key = env['identity'].get('oauth_token')
+        token = self.manager.get_access_token(token_key, env['consumer'])
+        if token:
+            env['token'] = token
+            return True
+        self._set_unauth_app(env['environ'])
+        return False
+    
+    def _verify_request(self, env):
+        req = oauth2.Request(
+            method=env['environ']['REQUEST_METHOD'],
+            url=construct_url(env['environ'], with_query_string=False),
+            parameters=env['identity'])
+        try:
+            self.server.verify_request(req, env['consumer'], env.get('token'))
+        except oauth2.Error, e:
+            self._set_unauth_app(env['environ'])
+            return False
+        return True
+
+    def _request_token_app(self, env):
+        # An app that creates and returns a request token
+        def token_app(environ, start_response):
+            token = self.manager.create_request_token(env['consumer'],
+                env['identity']['oauth_callback'])
+            start_response('200 OK', [
+                ('Content-Type', 'application/x-www-form-urlencoded')
+            ])
+            return [urlencode(dict(
+                oauth_token=token.key,
+                oauth_token_secret=token.secret,
+                oauth_callback_confirmed='true'))]
+        env['environ']['repoze.who.application'] = token_app
+        return True
+
+    def _access_token_app(self, env):
+        # An app that creates and returns an access token
+        def token_app(environ, start_response):
+            atoken = self.manager.make_access_token(env.get('token'))
+            start_response('200 OK', [
+                ('Content-Type', 'application/x-www-form-urlencoded')
+            ])
+            return [urlencode(dict(
+                oauth_token=atoken.key,
+                oauth_token_secret=atoken.secret))]
+        env['environ']['repoze.who.application'] = token_app
+        return True
+
+    flows = {
+        'non-oauth': [],
+        '2-legged': [
+            _get_consumer,
+            _verify_request,
+        ],
+        '3-legged': [
+            _get_consumer,
+            _get_access_token,
+            _verify_request,
+        ],
+        'request-token': [
+            _check_POST,
+            _check_oauth_params,
+            _check_callback,
+            _get_consumer,
+            _verify_request,
+            _request_token_app,
+        ],
+        'access-token': [
+            _check_POST,
+            _check_oauth_params,
+            _get_consumer,
+            _get_request_token,
+            _verify_request,
+            _access_token_app,
+        ]
+    }
 
     # IAuthenticator
     def authenticate(self, environ, identity):
-        # Create an unauthorized app if this is an token request and something
-        # goes wrong
-        unauth_app = self._make_unauth_app_setter(environ)
+        flow = self._detect_flow(environ, identity)
+        env = dict(environ=environ, identity=identity if identity else {})
+        failed = False
+        for validator in self.flows[flow]:
+            if not validator(self, env):
+                failed = True
+                break
 
-        if self._is_token_query(environ) and \
-            environ['REQUEST_METHOD'].upper() != 'POST':
-            # All token queries have to be POSTed - request failed
-            unauth_app()
+        if failed:
             return
 
-        if not identity or filter(lambda k: not k.startswith('oauth_'),
-                identity.keys()):
-            # There are keys not from oauth - probably not our credentials
-            unauth_app()
-            return
+        consumer = env.get('consumer')
+        if consumer:
+            identity['repoze.who.consumerkey'] = consumer.key
+            identity['consumer'] = consumer
 
-        consumer = self.manager.get_consumer_by_key(
-            identity['oauth_consumer_key'])
-        if not consumer:
-            # Consumer not found
-            unauth_app()
-            return
+            token = env.get('token')
+            if token:
+                return token.userid
+            else:
+                return 'consumer:%s' % consumer.key
 
-        req = self._request(consumer, environ, identity)
-        token = None
+        ## Create an unauthorized app if this is an token request and something
+        ## goes wrong
+        #unauth_app = self._make_unauth_app_setter(environ)
 
-        try:
-            self.server.verify_request(req, consumer, token)
-        except oauth2.Error, e:
-            unauth_app()
-            return
+        #if self._is_token_query(environ) and \
+        #    environ['REQUEST_METHOD'].upper() != 'POST':
+        #    # All token queries have to be POSTed - request failed
+        #    unauth_app()
+        #    return
 
-        # Remember the consumer
-        identity['repoze.who.consumerkey'] = consumer.key
-        identity['consumer'] = consumer
+        #if not identity or filter(lambda k: not k.startswith('oauth_'),
+        #        identity.keys()):
+        #    # There are keys not from oauth - probably not our credentials
+        #    unauth_app()
+        #    return
 
-        token_app = self._make_token_app_setter(environ, consumer)
-        if token_app:
-            # A valid consumer wants a token. I think we can give him that -
-            # replace the downstream app with our own which returns the new
-            # token.
-            token_app()
+        #if self._is_request_token_query(environ, identity) and \
+        #    not identity.get('oauth_callback'):
+        #    # We absolutely require an oauth_callback for a 3-legged flow
+        #    # according to the updated protocol
+        #    unauth_app()
+        #    return
 
-        # Return 'consumer:key' as we want to be sure it will not be found among
-        # simple users
-        return 'consumer:%s' % consumer.key
+        #consumer = self.manager.get_consumer_by_key(
+        #    identity['oauth_consumer_key'])
+        #if not consumer:
+        #    # Consumer not found
+        #    unauth_app()
+        #    return
+
+
+        # If this is an access token request then try to find the equivalent
+        # token in the db
+        #if self._is_access_token_query(environ, identity):
+        #    token = self.manager.get_request_token(identity['oauth_token'])
+        #    if not token or token.verifier != identity['oauth_verifier']:
+        #        unauth_app()
+        #        return
+        #elif identity.get('oauth_token'):
+        #    token = self.manager.get_access_token(identity['oauth_token'],
+        #        consumer)
+        #else:
+        #    token = None
+
+        #req = self._request(consumer, environ, identity)
+        #try:
+        #    self.server.verify_request(req, consumer, token)
+        #except oauth2.Error, e:
+        #    unauth_app()
+        #    return
+
+        ## Remember the consumer
+        #identity['repoze.who.consumerkey'] = consumer.key
+        #identity['consumer'] = consumer
+
+        #token_app = self._make_token_app_setter(environ, identity, consumer,
+        #    token)
+        #if token_app:
+        #    # A valid consumer wants a token. I think we can give him that -
+        #    # replace the downstream app with our own which returns the new
+        #    # token.
+        #    token_app()
+
+        #if token:
+        #    return token.userid
+        #else:
+        #    # Return 'consumer:key' as we want to be sure it will not be found
+        #    # among simple users
+        #    return 'consumer:%s' % consumer.key
 
 
     # IChallenger

@@ -1,4 +1,7 @@
+from paste.request import parse_dict_querystring
 from repoze.what.predicates import Predicate
+
+from repoze.who.plugins.oauth import DefaultManager
 
 
 class is_consumer(Predicate):
@@ -58,3 +61,51 @@ class not_oauth(Predicate):
         if environ.get('repoze.who.identity', {}).get('repoze.who.consumerkey'):
             self.unmet()
 
+
+class token_authorization(Predicate):
+    message = u'No valid matching OAuth token found'
+
+    def __init__(self, DBSession, Manager=DefaultManager):
+        self.Manager = Manager
+        self.DBSession = DBSession
+
+    @property
+    def manager(self):
+        if not hasattr(self, '_manager'):
+            self._manager = self.Manager(self.DBSession)
+        return self._manager
+
+    def _make_callback(self):
+        def callback_maker(token_key, userid):
+            """Register the user to the request token and construct the token
+            authorization parameters.
+
+            Returns:
+            - verifier - an authorization verification code
+            - url - a URL to redirect to (suitable if a user agent is a browser)
+            """
+            token = self.manager.get_request_token(token_key)
+            token.userid = userid
+            token.generate_verifier()
+            self.DBSession.flush()
+            return dict(
+                verifier=token.verifier,
+                url=token.callback_url,
+            )
+        return callback_maker
+
+    def evaluate(self, environ, credentials):
+        if not 'oauth' in environ:
+            environ['oauth'] = {}
+        if environ['REQUEST_METHOD'] == 'GET':
+            params = parse_dict_querystring(environ)
+            token_key = params.get('oauth_token')
+            if not token_key:
+                self.unmet()
+
+            token = self.manager.get_request_token(token_key)
+            if not token:
+                self.unmet()
+            environ['oauth']['token'] = token
+        elif environ['REQUEST_METHOD'] == 'POST':
+            environ['oauth']['make_callback'] = self._make_callback()

@@ -12,6 +12,7 @@ class ManagerTester(unittest.TestCase):
         engine = sa.create_engine('sqlite:///%s' % self.testdb)
         self.session = orm.scoped_session(
             orm.sessionmaker(autoflush=True, autocommit=True, bind=engine))
+        self.metadata = sa.MetaData(bind=self.session.bind)
         global DBSession
         DBSession = self.session
 
