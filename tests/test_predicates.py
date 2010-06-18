@@ -12,7 +12,7 @@ from .base import ManagerTester
 # From repoze.what tests
 
 class BasePredicateTester(ManagerTester):
-    """Base test case for predicates."""
+    """Base test class for predicates."""
 
     def eval_met_predicate(self, p, environ):
         """Evaluate a predicate that should be met"""
@@ -47,14 +47,20 @@ class BasePredicateTester(ManagerTester):
 
 
 class TestIsConsumer(BasePredicateTester):
+    r"""Tests for is_consumer predicate"""
 
     def test_without_credentials(self):
+        r"""Test how is_consumer behaves without credentials"""
         env = self._make_environ()
         p = is_consumer()
         self.eval_unmet_predicate(p, env, 'The current user must be a consumer')
 
     def test_with_credentials(self):
+        r"""Test how is_consumer handles credentials"""
         env = self._make_environ()
+        # The consumer has to be defined in both
+        #   repoze.what.identity - repoze.what.userid (as consumer:...) and
+        #   repoze.who.identity - repoze.who.consumerkey
         # what.credentials - what.userid is not enough
         env['repoze.what.credentials']['repoze.what.userid'] = \
             'consumer:Some Consumer'
@@ -66,11 +72,11 @@ class TestIsConsumer(BasePredicateTester):
         env['repoze.who.identity']['repoze.who.consumerkey'] = 'Some Consumer'
         self.eval_unmet_predicate(p, env, 'The current user must be a consumer')
 
-        # what.credentials must have a consumer: prefix
+        # what.credentials must have a 'consumer:' prefix
         env['repoze.what.credentials']['repoze.what.userid'] = 'Some Consumer'
         self.eval_unmet_predicate(p, env, 'The current user must be a consumer')
 
-        # what.credentials after consumer: prefix must match who.consumerid
+        # what.credentials after 'consumer:' prefix must match who.consumerid
         env['repoze.what.credentials']['repoze.what.userid'] = \
             'consumer:Some Other Consumer'
         self.eval_unmet_predicate(p, env, 'The current user must be a consumer')
@@ -78,24 +84,32 @@ class TestIsConsumer(BasePredicateTester):
         # Now make them match
         env['repoze.what.credentials']['repoze.what.userid'] = \
             'consumer:Some Consumer'
+        # And all is ok now
         self.eval_met_predicate(p, env)
 
+        # We can ask for a particular consumer
         p = is_consumer('Some Consumer')
         self.eval_met_predicate(p, env)
 
+        # But not some other
         p = is_consumer('Some Other Consumer')
         self.eval_unmet_predicate(p, env, 'The current user must be a consumer')
 
 
 class TestNotOAuth(BasePredicateTester):
+    r"""Tests for not_oauth predicate"""
 
     def test_without_credentials(self):
+        r"""Test how not_oauth behaves without credentials"""
         env = self._make_environ()
         p = not_oauth()
+        # We're good to go! As long as we don't mention oauth and consumers
         self.eval_met_predicate(p, env)
 
     def test_with_credentials(self):
+        r"""Test how not_oauth handles credentials"""
         env = self._make_environ()
+        # Do not even try to pass consumers
         env['repoze.what.credentials']['repoze.what.userid'] = \
             'consumer:Some Consumer'
         p = not_oauth()
@@ -106,6 +120,7 @@ class TestNotOAuth(BasePredicateTester):
         p = not_oauth()
         self.eval_unmet_predicate(p, env, 'Access through OAuth forbidden')
 
+        # While simple users will do
         env = self._make_environ()
         env['repoze.who.identity']['repoze.who.userid'] = 'Some User'
         p = not_oauth()
@@ -113,8 +128,10 @@ class TestNotOAuth(BasePredicateTester):
 
 
 class TestTokenAuthorization(BasePredicateTester):
+    r"""Tests for not_oauth predicate"""
 
     def test_token_authorization(self):
+        r"""Test how token_authorization behaves in GET and POST requests"""
         env = self._make_environ()
         p = token_authorization(self.session)
 
@@ -125,7 +142,7 @@ class TestTokenAuthorization(BasePredicateTester):
         env['QUERY_STRING'] = urlencode(dict(oauth_token='some-token'))
         self.eval_unmet_predicate(p, env, 'No valid matching OAuth token found')
         # There is no token in the environment
-        self.assertFalse(env['oauth'].get('token'))
+        self.assertFalse(env['repoze.what.oauth'].get('token'))
 
         # Now create a consumer and the token and try again
         consumer = Consumer(key='some-consumer', secret='some-secret')
@@ -134,18 +151,19 @@ class TestTokenAuthorization(BasePredicateTester):
             callback=u'http://www.test.com/some/path?x=1&y=%20a')
         self.session.add(consumer)
         self.session.flush()
+        # This time we are passed through
         self.eval_met_predicate(p, env)
 
         # Environment now contains a token which was found according to the
-        # query string
-        self.assertEquals(env['oauth']['token'], token)
+        # query string parameters
+        self.assertEquals(env['repoze.what.oauth']['token'], token)
 
         # Now construct a POST query and expect to find a callback function to
         # authorize the request token
         env = self._make_environ()
         env['REQUEST_METHOD'] = 'POST'
         self.eval_met_predicate(p, env)
-        callback_maker = env['oauth']['make_callback']
+        callback_maker = env['repoze.what.oauth']['make_callback']
         self.assertTrue(callback_maker)
 
         # We must provide a request token key and a userid to authorize a
@@ -154,8 +172,8 @@ class TestTokenAuthorization(BasePredicateTester):
         self.assertEquals(len(callback['verifier']), 6)
         self.assertTrue(callback['verifier'] in callback['url'])
 
-        # If the token callback url was provided as 'oob' (out of bounds) then
-        # the callback['url'] should also specify oob
+        # If the token callback url was provided as 'oob' (out of band) then the
+        # callback['url'] should also specify oob
         token.callback = u'oob'
         callback = callback_maker('some-token', u'some-user')
         self.assertEquals(callback['url'], 'oob')

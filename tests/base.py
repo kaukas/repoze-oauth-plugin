@@ -7,18 +7,27 @@ from sqlalchemy import orm
 DBSession = None
 
 class ManagerTester(unittest.TestCase):
+    r"""A base class for the tests that need a manager and db session"""
+
     def setUp(self):
+        # Create an sqlalchemy testdb
         self.testdb = os.path.join(os.path.dirname(__file__), 'test.db')
         engine = sa.create_engine('sqlite:///%s' % self.testdb)
+        # Create a session with autoflush and autocommit. Actually, this means
+        # we'll have to flush manually...
         self.session = orm.scoped_session(
             orm.sessionmaker(autoflush=True, autocommit=True, bind=engine))
         self.metadata = sa.MetaData(bind=self.session.bind)
+        # Create a manager
         from repoze.who.plugins.oauth import DefaultManager
         self.manager = DefaultManager(self.session)
+        # Store the session globally so that it could be imported from this
+        # package
         global DBSession
         DBSession = self.session
 
     def tearDown(self):
+        # Just remove the DB file
         try:
             os.unlink(self.testdb)
         except OSError:

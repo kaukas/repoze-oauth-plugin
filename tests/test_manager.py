@@ -5,15 +5,18 @@ from .base import ManagerTester
 
 
 class TestOAuthDefaultManager(ManagerTester):
+    r"""Test the default manager for OAuth plugin"""
 
-    def test_consumer_manager(self):
+    def test_get_consumer_by_key(self):
+        r"""Test how the manager finds consumers by keys"""
+        # Create the manager
         from repoze.who.plugins.oauth import DefaultManager, Consumer
         manager = DefaultManager(DBSession=self.session)
 
         # Consumer exists not
         self.assertEquals(manager.get_consumer_by_key('abcd'), None)
 
-        # Create him
+        # Create a sample consumer
         consumer = Consumer(key='abcd', secret='abcdef')
         self.session.add(consumer)
         self.session.flush()
@@ -23,12 +26,17 @@ class TestOAuthDefaultManager(ManagerTester):
         # Consumer exists not
         self.assertEquals(manager.get_consumer_by_key('abdc'), None)
 
-    def test_cm_tables_and_relationships(self):
+
+    def test_tables_and_relationships(self):
+        r"""Test how the manager sets up tables and relationships"""
         from repoze.who.plugins.oauth import (DefaultManager, Consumer,
             RequestToken, AccessToken)
 
         def check_relationships(Manager, Consumer, RequestToken, AccessToken,
                                 orphans=True):
+            r"""The relationship checking function we want to run on various
+            relationship setups"""
+            # Drop all previous tables
             self.metadata.drop_all(tables=[
                 Consumer.__table__,
                 RequestToken.__table__,
@@ -37,6 +45,7 @@ class TestOAuthDefaultManager(ManagerTester):
 
             # The default manager creates the tables and sets up relationships
             manager = Manager(DBSession=self.session)
+            # Check that relationships were established properly
             self.assertTrue(hasattr(RequestToken, 'consumer_key'))
             self.assertTrue(hasattr(Consumer, 'request_tokens'))
             self.assertTrue(hasattr(Consumer, 'access_tokens'))
@@ -73,15 +82,19 @@ class TestOAuthDefaultManager(ManagerTester):
                 request_tokens)
             self.assertEquals(len(list(self.session.query(AccessToken))),
                 access_tokens)
+            # Discard all the objects we had here
             self.session.expunge_all()
 
-        # First, the normal case
+        # Create the various setups to be tested with check_relationships
+        # First, the normal (default) case
         check_relationships(DefaultManager, Consumer, RequestToken, AccessToken)
 
 
         # Now create a custom manager that modifies the tables
         class MyManager(DefaultManager):
+            r"""A manager which adds custom attributes to the tables"""
             def modify_tables(self):
+                r"""Add 'version' to Consumer and 'valid' to AccessToken"""
                 self.Consumer.version = sa.Column(sa.types.String(2))
                 self.AccessToken.valid = sa.Column(sa.types.Boolean,
                     default=True)
@@ -90,17 +103,22 @@ class TestOAuthDefaultManager(ManagerTester):
         # Check that consumer has a version
         self.assertTrue(hasattr(Consumer, 'version'))
         cons = self.session.query(Consumer).first()
+        # Which is NULL by default
         self.assertEquals(cons.version, None)
+        # But we can set it
         cons.version = '1.1'
         self.session.flush()
+        # And it is persisted correctly
         self.assertEquals(self.session.query(Consumer).first().version, '1.1')
 
         # Check that an access token can be (in)valid (a new attribute)
         self.assertTrue(hasattr(AccessToken, 'valid'))
         cons = self.session.query(AccessToken).first()
+        # True by default
         self.assertEquals(cons.valid, True)
         cons.valid = False
         self.session.flush()
+        # Also persisted correctly
         self.assertFalse(self.session.query(AccessToken).first().valid)
 
 
@@ -108,18 +126,21 @@ class TestOAuthDefaultManager(ManagerTester):
         # different relationships (without delete and delete-orphan)
         from repoze.who.plugins.oauth.model import _Base
         class MyConsumer(_Base):
+            r"""A simplified consumer"""
             __tablename__ = 'oauth_my_consumers'
 
             key = sa.Column(sa.types.String(40), primary_key=True)
             secret = sa.Column(sa.types.String(40), nullable=False)
 
         class MyRequestToken(_Base):
+            r"""A simplified request token"""
             __tablename__ = 'oauth_my_request_tokens'
 
             key = sa.Column(sa.types.String(40), primary_key=True)
             secret = sa.Column(sa.types.String(40), nullable=False)
 
         class MyAccessToken(_Base):
+            r"""A simplified access token"""
             __tablename__ = 'oauth_my_access_tokens'
 
             key = sa.Column(sa.types.String(40), primary_key=True)
@@ -127,15 +148,18 @@ class TestOAuthDefaultManager(ManagerTester):
             userid = sa.Column(sa.types.Unicode(200), nullable=False)
 
         class MyManager(DefaultManager):
+            r"""A custom manager with custom tables"""
             Consumer = MyConsumer
             RequestToken = MyRequestToken
             AccessToken = MyAccessToken
 
             def setup_relationships(self):
+                r"""Setup custom relationships for the custom tables"""
                 self.RequestToken.consumer_key = sa.Column(sa.ForeignKey(
                     self.Consumer.key))
                 self.AccessToken.consumer_key = sa.Column(sa.ForeignKey(
                     self.Consumer.key))
+                # In particular, do not ask for cascade on delete
                 self.Consumer.request_tokens = orm.relation(self.RequestToken,
                     backref=orm.backref('consumer'),
                     cascade='')
@@ -147,13 +171,13 @@ class TestOAuthDefaultManager(ManagerTester):
             MyAccessToken, orphans=False)
 
 
-    def test_create_token(self):
-        """Test token creation"""
+    def test_token_creation(self):
+        r"""Test token creation at the model level (not manager actually)"""
         from repoze.who.plugins.oauth import (DefaultManager, Consumer,
             RequestToken, AccessToken)
         manager = DefaultManager(DBSession=self.session)
 
-        # Create a consumer and ask it to create a request token
+        # Create a consumer and a request token
         cons1 = Consumer(key='consumer1', secret='secret1')
         self.session.add(cons1)
 
@@ -162,6 +186,7 @@ class TestOAuthDefaultManager(ManagerTester):
         # Check various attributes and relations
         self.assertEquals(req_token.consumer, cons1)
         self.assertEquals(cons1.request_tokens, [req_token])
+        # We have exactly one token now
         self.assertEquals(len(list(self.session.query(RequestToken))), 1)
         self.assertEquals(len(req_token.key), 40)
         self.assertEquals(len(req_token.secret), 40)
@@ -185,7 +210,10 @@ class TestOAuthDefaultManager(ManagerTester):
             session=self.session, key='rtkey')
         token2 = RequestToken.create(cons1, u'http://someurl.com',
             session=self.session, key='rtkey')
+        # The first token has the provided key
         self.assertEquals(token1.key, 'rtkey')
+        # The second token got a new random key as the provided one would have
+        # conflicted with the token1 key
         self.assertNotEquals(token2.key, 'rtkey')
         self.assertEquals(len(token2.key), 40)
 

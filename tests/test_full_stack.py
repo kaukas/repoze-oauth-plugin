@@ -15,7 +15,9 @@ from repoze.what.plugins.oauth import is_consumer, not_oauth
 
 
 class DemoApp(object):
+    r"""A demo app with a stupid routing mechanism"""
     def __call__(self, environ, start_response):
+        r"""Here the routing happens"""
         if environ.get('PATH_INFO') == '/secret-for-all':
             return self.secret_for_all(environ, start_response)
         elif environ.get('PATH_INFO') == '/secret-for-app1':
@@ -24,6 +26,7 @@ class DemoApp(object):
             return self.secret_for_others(environ, start_response)
 
     def secret_for_all(self, environ, start_response):
+        r"""This can be accessed by all consumers"""
         if not is_consumer().is_met(environ):
             start_response('401 ', [('Content-Type', 'text/plain')])
             return HTTPUnauthorized()
@@ -31,6 +34,7 @@ class DemoApp(object):
         return ['This is a secret for all to see']
 
     def secret_for_app1(self, environ, start_response):
+        r"""This can be accessed by app1 consumer only"""
         if not is_consumer('app1').is_met(environ):
             start_response('401 ', [('Content-Type', 'text/plain')])
             return HTTPUnauthorized()
@@ -38,6 +42,7 @@ class DemoApp(object):
         return ['This is a secret for app1 only']
 
     def secret_for_others(self, environ, start_response):
+        r"""This can not be accessed from oauth"""
         if not not_oauth().is_met(environ):
             start_response('401 ', [('Content-Type', 'text/plain')])
             return HTTPUnauthorized()
@@ -47,7 +52,10 @@ class DemoApp(object):
 
 
 class TestOAuthFullStack(ManagerTester):
+    r"""Full stack tests"""
+
     def _make_app(self):
+        r"""Create a demo app with the WSGI-like stack applied on top"""
         self.plugin = self._makeOne(realm='OAuthRealm')
 
         app = DemoApp()
@@ -63,6 +71,7 @@ class TestOAuthFullStack(ManagerTester):
 
 
     def test_minimal(self):
+        r"""Test a minimal 2-legged scenario"""
         app = self._make_app()
 
         # Without authentication we are not allowed in

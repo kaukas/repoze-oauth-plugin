@@ -100,8 +100,9 @@ class OAuthPlugin(object):
         return True
 
     def _check_oauth_params(self, env):
-        identity = env['identity']
-        if filter(lambda k: not k.startswith('oauth_'), identity.keys()):
+        invalid_oauth = lambda k: not k.startswith('oauth_') and \
+            k.lower() != 'realm'
+        if filter(invalid_oauth, env['identity'].keys()):
             # There are keys not from oauth - probably not our credentials
             return False
         return True

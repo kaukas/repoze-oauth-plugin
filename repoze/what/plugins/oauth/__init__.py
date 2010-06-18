@@ -94,8 +94,9 @@ class token_authorization(Predicate):
         return callback_maker
 
     def evaluate(self, environ, credentials):
-        if not 'oauth' in environ:
-            environ['oauth'] = {}
+        if not 'repoze.what.oauth' in environ:
+            environ['repoze.what.oauth'] = {}
+        what_env = environ['repoze.what.oauth']
         if environ['REQUEST_METHOD'] == 'GET':
             params = parse_dict_querystring(environ)
             token_key = params.get('oauth_token')
@@ -105,6 +106,6 @@ class token_authorization(Predicate):
             token = self.manager.get_request_token(token_key)
             if not token:
                 self.unmet()
-            environ['oauth']['token'] = token
+            what_env['token'] = token
         elif environ['REQUEST_METHOD'] == 'POST':
-            environ['oauth']['make_callback'] = self._make_callback()
+            what_env['make_callback'] = self._make_callback()

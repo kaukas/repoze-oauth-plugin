@@ -17,6 +17,7 @@ def gen_random_string(length=40, alphabet=ascii_letters + digits):
 
 
 class Consumer(_Base):
+    r"""A resource consumer (usually an application) Database representation."""
     __tablename__ = 'oauth_consumers'
 
     key = sa.Column(sa.types.String(40), primary_key=True)
@@ -30,15 +31,19 @@ class Token(object):
 
     @classmethod
     def _create_token(cls, consumer_tokens, session=None, **kwargs):
-        """Create a token and append it to the provided consumer token list.
-        If session given and a token with this key exists a new random key will
-        be tried
+        """Create a token and append it to the provided consumer token list.  If
+        session given and a token with this key exists a new random keys will be
+        tried until an unused key will be found
         """
         if not 'key' in kwargs:
+            # Generate the key
             kwargs['key'] = gen_random_string(length=40)
         if not 'secret' in kwargs:
+            # Generate the secret
             kwargs['secret'] = gen_random_string(length=40)
+        # Create the token (in memory, not in DB yet)
         token = cls(**kwargs)
+        # Assign it to the consumer tokens list
         consumer_tokens.append(token)
         # If the session is provided then on flush we can get an integrity error
         # in case such a key already exists. In that case re-generate the key
@@ -49,6 +54,7 @@ class Token(object):
                 try:
                     session.flush()
                 except (sa.exc.IntegrityError, sa.exc.FlushError):
+                    # A token with this key already exists. Generate a new key
                     token.key = gen_random_string(length=40)
                 else:
                     success = True
@@ -56,6 +62,7 @@ class Token(object):
 
 
 class RequestToken(_Base, Token):
+    r"""A request token representation in Database"""
     __tablename__ = 'oauth_request_tokens'
 
     key = sa.Column(sa.types.String(40), primary_key=True)
@@ -68,6 +75,7 @@ class RequestToken(_Base, Token):
 
     @classmethod
     def create(cls, consumer, callback, session=None, **kwargs):
+        r"""Create a request token instance"""
         callback = unicode(callback)
         return cls._create_token(consumer.request_tokens, session=session,
             callback=callback, **kwargs)
