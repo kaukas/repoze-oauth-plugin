@@ -36,7 +36,7 @@ class DemoApp(object):
             return HTTPUnauthorized()
         start_response('200 OK', [('Content-Type', 'text/plain')])
         return ['This is a secret for app1 only']
-        
+
     def secret_for_others(self, environ, start_response):
         if not not_oauth().is_met(environ):
             start_response('401 ', [('Content-Type', 'text/plain')])
@@ -109,7 +109,7 @@ class TestOAuthFullStack(ManagerTester):
         # The new consumer was created
         self.assertEquals(self.plugin.manager.get_consumer_by_key('app1').key,
             consumer1.key)
-        
+
         # Now it should work
         o_req = oauth.Request.from_consumer_and_token(consumer1, token=None,
             http_method='GET', http_url='http://localhost/secret-for-app1')

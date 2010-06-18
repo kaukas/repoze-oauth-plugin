@@ -12,7 +12,7 @@ class TestOAuthDefaultManager(ManagerTester):
 
         # Consumer exists not
         self.assertEquals(manager.get_consumer_by_key('abcd'), None)
-        
+
         # Create him
         consumer = Consumer(key='abcd', secret='abcdef')
         self.session.add(consumer)

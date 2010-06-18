@@ -33,6 +33,8 @@ class TestOAuthPlugin(ManagerTester):
         plugin = self._makeOne(DBSession='tests.base:DBSession')
         self.assertEquals(plugin.manager.DBSession, self.session)
 
+        self.assertTrue(str(plugin).startswith('<OAuthPlugin '))
+
 
     def test_parse_params(self):
         plugin = self._makeOne()
@@ -46,8 +48,19 @@ class TestOAuthPlugin(ManagerTester):
             ('oauth_timestamp', '123456'),
             ('oauth_version', '1.0'),
         ]
-        pstr = '&'.join(['%s=%s' % (k, v) for k, v in params])
+        pstr = urlencode(params)
+        environ = self._makeEnviron({
+            'REQUEST_METHOD': 'POST',
+            'wsgi.input': StringIO(),
+            'QUERY_STRING': pstr,
+        })
+        self.assertEquals(plugin._parse_params(environ), dict(params))
 
+        non_oauth_params = [
+            ('x', 'something'),
+            ('what-am-i', 'doin-here?'),
+        ]
+        pstr = urlencode(params + non_oauth_params)
         environ = self._makeEnviron({
             'REQUEST_METHOD': 'POST',
             'wsgi.input': StringIO(),
@@ -75,88 +88,376 @@ class TestOAuthPlugin(ManagerTester):
         self.assertEquals(plugin._parse_params(environ), dict(params[1:]))
 
 
-    #def test_is_token_request(self):
-    #    """Test how the plugin recognizes request and access token queries"""
-    #    # The simple case - different urls
-    #    plugin = self._makeOne(
-    #        url_request_token='/request_token',
-    #        url_access_token='/access_token')
+    def test_request_type_detector(self):
+        plugin = self._makeOne()
+        std_env_params = {
+            'wsgi.url_scheme': 'http',
+            'SERVER_NAME': 'www.example.com',
+            'SERVER_PORT': '80',
+            'REQUEST_METHOD': 'POST',
+            'QUERY_STRING': '',
+            'wsgi.input': '',
+        }
 
-    #    environ = self._makeEnviron({'PATH_INFO': '/request_token'})
-    #    identity = {}
-    #    self.assertTrue(plugin._is_request_token_query(environ, identity))
-    #    self.assertFalse(plugin._is_access_token_query(environ, identity))
+        # A simple path without any parameters
+        env = self._makeEnviron(std_env_params)
+        env.update({'PATH_INFO': '/somepath'})
+        ident = {}
+        self.assertEquals(plugin._detect_request_type(env, ident), 'non-oauth')
 
-    #    # The oauth_token and oauth_verifier must NOT be provided for the
-    #    # request token query
-    #    identity = {
-    #        'oauth_verifier': 'abcd',
-    #        'oauth_token': False
-    #    }
-    #    self.assertTrue(plugin._is_request_token_query(environ, identity))
-    #    self.assertFalse(plugin._is_access_token_query(environ, identity))
+        # A simple path but with oauth consumer information
+        ident = {'oauth_consumer_key': '1234'}
+        self.assertEquals(plugin._detect_request_type(env, ident), '2-legged')
 
-    #    identity = {
-    #        'oauth_token': 'abcd',
-    #        'oauth_verifier': '1234'
-    #    }
-    #    self.assertFalse(plugin._is_request_token_query(environ, identity))
-    #    self.assertFalse(plugin._is_access_token_query(environ, identity))
+        # A simple path but with oauth consumer and token information
+        ident = {
+            'oauth_consumer_key': '1234',
+            'oauth_token': 'abcd',
+        }
+        self.assertEquals(plugin._detect_request_type(env, ident), '3-legged')
 
-    #    # Both oauth_token and oauth_verifier MUST be provided for the access
-    #    # token query
-    #    environ = self._makeEnviron({'PATH_INFO': '/access_token'})
-    #    identity = {'oauth_token': 'abcd'}
-    #    self.assertFalse(plugin._is_request_token_query(environ, identity))
-    #    self.assertFalse(plugin._is_access_token_query(environ, identity))
+        # A request token path
+        env = self._makeEnviron(std_env_params)
+        env.update({'PATH_INFO': '/oauth/request_token'})
+        ident = {}
+        self.assertEquals(plugin._detect_request_type(env, ident),
+            'request-token')
 
-    #    identity = {'oauth_verifier': '1234'}
-    #    self.assertFalse(plugin._is_request_token_query(environ, identity))
-    #    self.assertFalse(plugin._is_access_token_query(environ, identity))
+        # An access token path
+        env = self._makeEnviron(std_env_params)
+        env.update({'PATH_INFO': '/oauth/access_token'})
+        ident = {}
+        self.assertEquals(plugin._detect_request_type(env, ident),
+            'access-token')
 
-    #    identity = {
-    #        'oauth_token': 'abcd',
-    #        'oauth_verifier': '1234'
-    #    }
-    #    self.assertFalse(plugin._is_request_token_query(environ, identity))
-    #    self.assertTrue(plugin._is_access_token_query(environ, identity))
 
-    #    # If the urls for request and access tokens are the same then the token
-    #    # type is determined purely by the parameters provided
-    #    plugin = self._makeOne(
-    #        url_request_token='/token',
-    #        url_access_token='/token')
+        # Now - for the special case when request and access token urls are the
+        # same
+        plugin = self._makeOne(url_request_token='/token',
+            url_access_token='/token')
 
-    #    environ = self._makeEnviron({'PATH_INFO': '/token'})
-    #    identity = {
-    #        'oauth_token': 'abcd',
-    #        'oauth_verifier': '1234'
-    #    }
-    #    self.assertFalse(plugin._is_request_token_query(environ, identity))
-    #    self.assertTrue(plugin._is_access_token_query(environ, identity))
-    #    self.assertTrue(plugin._is_token_query(environ))
+        # If we're hitting the token url without parameters
+        env = self._makeEnviron(std_env_params)
+        env.update({'PATH_INFO': '/token'})
+        ident = {}
+        self.assertEquals(plugin._detect_request_type(env, ident),
+            'request-token')
 
-    #    identity = {}
-    #    self.assertTrue(plugin._is_request_token_query(environ, identity))
-    #    self.assertFalse(plugin._is_access_token_query(environ, identity))
-    #    self.assertTrue(plugin._is_token_query(environ))
+        # With token
+        ident = {'oauth_token': 'abc'}
+        self.assertEquals(plugin._detect_request_type(env, ident),
+            'access-token')
 
-    #    # The url is important too
-    #    environ = self._makeEnviron({'PATH_INFO': '/gettoken'})
-    #    identity = {
-    #        'oauth_token': 'abcd',
-    #        'oauth_verifier': '1234'
-    #    }
-    #    self.assertFalse(plugin._is_request_token_query(environ, identity))
-    #    self.assertFalse(plugin._is_access_token_query(environ, identity))
-    #    self.assertFalse(plugin._is_token_query(environ))
 
-    #    identity = {}
-    #    self.assertFalse(plugin._is_request_token_query(environ, identity))
-    #    self.assertFalse(plugin._is_access_token_query(environ, identity))
-    #    self.assertFalse(plugin._is_token_query(environ))
+    def test_check_POST(self):
+        plugin = self._makeOne()
+        env = dict(environ={
+            'REQUEST_METHOD': 'POST'
+        })
+        self.assertTrue(plugin._check_POST(env))
+        self.assertFalse('repoze.who.application' in env['environ'])
 
-        
+        env['environ']['REQUEST_METHOD'] = 'post'
+        self.assertTrue(plugin._check_POST(env))
+        self.assertFalse('repoze.who.application' in env['environ'])
+
+        env['environ']['REQUEST_METHOD'] = 'GET'
+        self.assertFalse(plugin._check_POST(env))
+        self.assertTrue('repoze.who.application' in env['environ'])
+
+
+    def test_check_oauth_params(self):
+        plugin = self._makeOne()
+        env = dict(environ={}, identity={})
+        self.assertTrue(plugin._check_oauth_params(env))
+
+        env['identity']['oauth_something'] = True
+        self.assertTrue(plugin._check_oauth_params(env))
+
+        env['identity']['auth_something'] = True
+        self.assertFalse(plugin._check_oauth_params(env))
+
+
+    def test_check_callback(self):
+        plugin = self._makeOne()
+        env = dict(environ={}, identity={
+            'oauth_callback': 'some-callback'
+        })
+        self.assertTrue(plugin._check_callback(env))
+        self.assertFalse('repoze.who.application' in env['environ'])
+
+        env['identity']['oauth_callback'] = ''
+        self.assertFalse(plugin._check_callback(env))
+        self.assertTrue(env['environ'].pop('repoze.who.application'))
+
+        del env['identity']['oauth_callback']
+        self.assertFalse(plugin._check_callback(env))
+        self.assertTrue(env['environ'].pop('repoze.who.application'))
+
+
+    def test_get_consumer(self):
+        from repoze.who.plugins.oauth import Consumer
+        self.assertEquals(len(list(self.session.query(Consumer))), 0)
+
+        consumer = Consumer(key=u'some-consumer', secret='some-secret')
+        self.session.add(consumer)
+        self.session.flush()
+
+        plugin = self._makeOne()
+        env = dict(environ={}, identity={
+            'oauth_consumer_key': 'some-consumer'
+        })
+        self.assertTrue(plugin._get_consumer(env))
+        self.assertFalse('repoze.who.application' in env['environ'])
+
+        env['identity']['oauth_consumer_key'] = 'another-consumer'
+        self.assertFalse(plugin._get_consumer(env))
+        self.assertTrue(env['environ'].pop('repoze.who.application'))
+
+        env['identity']['oauth_consumer_key'] = ''
+        self.assertFalse(plugin._get_consumer(env))
+        self.assertTrue(env['environ'].pop('repoze.who.application'))
+
+        del env['identity']['oauth_consumer_key']
+        self.assertFalse(plugin._get_consumer(env))
+        self.assertTrue(env['environ'].pop('repoze.who.application'))
+
+        self.session.delete(consumer)
+        self.session.flush()
+
+
+    def test_get_request_token(self):
+        from repoze.who.plugins.oauth import Consumer
+        self.assertEquals(len(list(self.session.query(Consumer))), 0)
+
+        consumer = Consumer(key=u'some-consumer', secret='some-secret')
+        self.session.add(consumer)
+        rtoken = self.manager.create_request_token(consumer, 'http://test.com')
+        rtoken.set_userid(u'some-user')
+        self.session.flush()
+
+        plugin = self._makeOne()
+        env = dict(environ={}, identity={
+            'oauth_token': rtoken.key,
+            'oauth_verifier': rtoken.verifier,
+        })
+        self.assertTrue(plugin._get_request_token(env))
+        self.assertTrue(env.pop('token'))
+        self.assertFalse('repoze.who.application' in env['environ'])
+
+        env = dict(environ={}, identity={
+            'oauth_token': rtoken.key,
+            'oauth_verifier': rtoken.verifier[:-1],
+        })
+        self.assertFalse(plugin._get_request_token(env))
+        self.assertFalse('token' in env)
+        self.assertTrue('repoze.who.application' in env['environ'])
+
+        env = dict(environ={}, identity={
+            'oauth_token': rtoken.key,
+        })
+        self.assertFalse(plugin._get_request_token(env))
+        self.assertFalse('token' in env)
+        self.assertTrue('repoze.who.application' in env['environ'])
+
+        env = dict(environ={}, identity={
+            'oauth_verifier': rtoken.verifier,
+        })
+        self.assertFalse(plugin._get_request_token(env))
+        self.assertFalse('token' in env)
+        self.assertTrue('repoze.who.application' in env['environ'])
+
+        env = dict(environ={}, identity={})
+        self.assertFalse(plugin._get_request_token(env))
+        self.assertFalse('token' in env)
+        self.assertTrue('repoze.who.application' in env['environ'])
+
+        self.session.delete(consumer)
+        self.session.flush()
+
+
+    def test_get_access_token(self):
+        from repoze.who.plugins.oauth import Consumer
+        self.assertEquals(len(list(self.session.query(Consumer))), 0)
+
+        consumer = Consumer(key=u'some-consumer', secret='some-secret')
+        self.session.add(consumer)
+        rtoken = self.manager.create_request_token(consumer, 'http://test.com')
+        rtoken.set_userid(u'some-user')
+        atoken = self.manager.create_access_token(rtoken)
+
+        plugin = self._makeOne()
+        env = dict(environ={}, consumer=consumer, identity={
+            'oauth_token': atoken.key
+        })
+        self.assertTrue(plugin._get_access_token(env))
+        self.assertTrue(env.pop('token'))
+        self.assertFalse('repoze.who.application' in env['environ'])
+
+        env = dict(environ={}, consumer=consumer, identity={
+            'oauth_token': atoken.key[:-1]
+        })
+        self.assertFalse(plugin._get_access_token(env))
+        self.assertFalse('token' in env)
+        self.assertTrue(env['environ'].pop('repoze.who.application'))
+
+        env = dict(environ={}, consumer=consumer, identity={})
+        self.assertFalse(plugin._get_access_token(env))
+        self.assertFalse('token' in env)
+        self.assertTrue(env['environ'].pop('repoze.who.application'))
+
+        self.session.delete(consumer)
+        self.session.flush()
+
+
+    def test_verify_request(self):
+        plugin = self._makeOne()
+
+        # 2 legs - successful
+        consumer = oauth2.Consumer('some-consumer', 'some-secret')
+        req = oauth2.Request.from_consumer_and_token(
+            http_method='GET',
+            http_url='http://www.example.com/app',
+            consumer=consumer,
+            token=None)
+        req.sign_request(signature_method=oauth2.SignatureMethod_HMAC_SHA1(),
+            consumer=consumer, token=None)
+        env = dict(environ={
+            'REQUEST_METHOD': 'GET',
+            'wsgi.url_scheme': 'http',
+            'SERVER_NAME': 'www.example.com',
+            'SERVER_PORT': '80',
+            'PATH_INFO': '/app',
+        }, consumer=consumer, identity=req)
+        self.assertTrue(plugin._verify_request(env))
+        self.assertFalse('repoze.who.application' in env['environ'])
+
+        # 2 legs - unsuccessful
+        # Unmatching request method
+        env['environ']['REQUEST_METHOD'] = 'POST'
+        self.assertFalse(plugin._verify_request(env))
+        self.assertTrue(env['environ'].pop('repoze.who.application'))
+        env['environ']['REQUEST_METHOD'] = 'GET'
+
+        # Unmatching url scheme
+        env['environ']['wsgi.url_scheme'] = 'https'
+        self.assertFalse(plugin._verify_request(env))
+        self.assertTrue(env['environ'].pop('repoze.who.application'))
+        env['environ']['wsgi.url_scheme'] = 'http'
+
+        # Unmatching server name
+        env['environ']['SERVER_NAME'] = 'www.example2.com'
+        self.assertFalse(plugin._verify_request(env))
+        self.assertTrue(env['environ'].pop('repoze.who.application'))
+        env['environ']['SERVER_NAME'] = 'www.example.com'
+
+        # Unmatching path info
+        env['environ']['PATH_INFO'] = '/other_app'
+        self.assertFalse(plugin._verify_request(env))
+        self.assertTrue(env['environ'].pop('repoze.who.application'))
+        env['environ']['PATH_INFO'] = '/app'
+
+        # Wrong consumer key
+        env['identity']['oauth_consumer_key'] = 'some-other-consumer'
+        self.assertFalse(plugin._verify_request(env))
+        self.assertTrue(env['environ'].pop('repoze.who.application'))
+        env['identity']['oauth_consumer_key'] = 'some-consumer'
+
+        # Wrong consumer secret
+        consumer.secret = 'another-secret'
+        self.assertFalse(plugin._verify_request(env))
+        self.assertTrue(env['environ'].pop('repoze.who.application'))
+        consumer.secret = 'some-secret'
+
+        # Wrong signature
+        signature = env['identity']['oauth_signature']
+        env['identity']['oauth_signature'] = signature[20:] + signature[:20]
+        self.assertFalse(plugin._verify_request(env))
+        self.assertTrue(env['environ'].pop('repoze.who.application'))
+        env['identity']['oauth_signature'] = signature
+
+        # With request token - successful
+        rtoken = oauth2.Token('some-token', 'some-secret')
+        req = oauth2.Request.from_consumer_and_token(
+            http_method='GET',
+            http_url='http://www.example.com/app',
+            consumer=consumer,
+            token=rtoken)
+        req.sign_request(signature_method=oauth2.SignatureMethod_HMAC_SHA1(),
+            consumer=consumer, token=rtoken)
+        env = dict(environ={
+            'REQUEST_METHOD': 'GET',
+            'wsgi.url_scheme': 'http',
+            'SERVER_NAME': 'www.example.com',
+            'SERVER_PORT': '80',
+            'PATH_INFO': '/app',
+        }, consumer=consumer, token=rtoken, identity=req)
+        self.assertTrue(plugin._verify_request(env))
+        self.assertFalse('repoze.who.application' in env['environ'])
+
+        # With request token - unsuccessful
+        # Unmatching token key
+        env['identity']['oauth_token'] = 'another-token'
+        self.assertFalse(plugin._verify_request(env))
+        self.assertTrue(env['environ'].pop('repoze.who.application'))
+        env['identity']['oauth_token'] = 'some-token'
+
+        # Unmatching token secret
+        rtoken.secret = 'another-secret'
+        self.assertFalse(plugin._verify_request(env))
+        self.assertTrue(env['environ'].pop('repoze.who.application'))
+        rtoken.secret = 'some-secret'
+
+
+    def test_request_token_app(self):
+        from repoze.who.plugins.oauth import Consumer, RequestToken
+        self.assertEquals(len(list(self.session.query(Consumer))), 0)
+
+        consumer = Consumer(key=u'some-consumer', secret='some-secret')
+        self.session.add(consumer)
+
+        plugin = self._makeOne()
+        env = dict(environ={}, consumer=consumer, identity={
+            'oauth_callback': 'oob'
+        })
+        self.assertTrue(plugin._request_token_app(env))
+        app = env['environ']['repoze.who.application']
+        enc_token = ''.join(app(env['environ'], lambda *args: None))
+        dec_token = parse_qs(enc_token)
+        token = self.session.query(RequestToken).filter_by(
+            key=dec_token['oauth_token'][0]).first()
+        self.assertTrue(token)
+        self.assertEquals(dec_token['oauth_token_secret'][0], token.secret)
+        self.assertEquals(dec_token['oauth_callback_confirmed'][0], 'true')
+
+        self.session.delete(consumer)
+        self.session.flush()
+
+
+    def test_access_token_app(self):
+        from repoze.who.plugins.oauth import Consumer, AccessToken
+        self.assertEquals(len(list(self.session.query(Consumer))), 0)
+        consumer = Consumer(key=u'some-consumer', secret='some-secret')
+        self.session.add(consumer)
+
+        rtoken = self.manager.create_request_token(consumer, 'oob')
+        rtoken.set_userid(u'some-user')
+
+        plugin = self._makeOne()
+        env = dict(environ={}, token=rtoken, identity={})
+        self.assertTrue(plugin._access_token_app(env))
+        app = env['environ']['repoze.who.application']
+        enc_token = ''.join(app(env['environ'], lambda *args: None))
+        dec_token = parse_qs(enc_token)
+        token = self.session.query(AccessToken).filter_by(
+            key=dec_token['oauth_token'][0]).first()
+        self.assertTrue(token)
+        self.assertEquals(dec_token['oauth_token_secret'][0], token.secret)
+
+        self.session.delete(consumer)
+        self.session.flush()
+
+
     def test_2_legged_flow(self):
         plugin = self._makeOne()
         std_env_params = {
@@ -439,59 +740,3 @@ class TestOAuthPlugin(ManagerTester):
 
         # Cleanup consumers
         self.session.execute(Consumer.__table__.delete())
-
-    def test_flow_detector(self):
-        plugin = self._makeOne()
-        std_env_params = {
-            'wsgi.url_scheme': 'http',
-            'SERVER_NAME': 'www.example.com',
-            'SERVER_PORT': '80',
-            'REQUEST_METHOD': 'POST',
-            'QUERY_STRING': '',
-            'wsgi.input': '',
-        }
-
-        # A simple path without any parameters
-        env = self._makeEnviron(std_env_params)
-        env.update({'PATH_INFO': '/somepath'})
-        ident = {}
-        self.assertEquals(plugin._detect_flow(env, ident), 'non-oauth')
-
-        # A simple path but with oauth consumer information
-        ident = {'oauth_consumer_key': '1234'}
-        self.assertEquals(plugin._detect_flow(env, ident), '2-legged')
-
-        # A simple path but with oauth consumer and token information
-        ident = {
-            'oauth_consumer_key': '1234',
-            'oauth_token': 'abcd',
-        }
-        self.assertEquals(plugin._detect_flow(env, ident), '3-legged')
-
-        # A request token path
-        env = self._makeEnviron(std_env_params)
-        env.update({'PATH_INFO': '/oauth/request_token'})
-        ident = {}
-        self.assertEquals(plugin._detect_flow(env, ident), 'request-token')
-
-        # An access token path
-        env = self._makeEnviron(std_env_params)
-        env.update({'PATH_INFO': '/oauth/access_token'})
-        ident = {}
-        self.assertEquals(plugin._detect_flow(env, ident), 'access-token')
-
-
-        # Now - for the special case when request and access token urls are the
-        # same
-        plugin = self._makeOne(url_request_token='/token',
-            url_access_token='/token')
-
-        # If we're hitting the token url without parameters
-        env = self._makeEnviron(std_env_params)
-        env.update({'PATH_INFO': '/token'})
-        ident = {}
-        self.assertEquals(plugin._detect_flow(env, ident), 'request-token')
-
-        # With token
-        ident = {'oauth_token': 'abc'}
-        self.assertEquals(plugin._detect_flow(env, ident), 'access-token')

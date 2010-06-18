@@ -70,7 +70,7 @@ class DefaultManager(object):
         return self.RequestToken.create(consumer, callback,
             session=self.DBSession)
 
-    def make_access_token(self, rtoken):
+    def create_access_token(self, rtoken):
         atoken = self.AccessToken.create(consumer=rtoken.consumer,
             userid=rtoken.userid, session=self.DBSession)
         self.DBSession.delete(rtoken)

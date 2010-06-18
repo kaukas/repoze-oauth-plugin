@@ -13,6 +13,8 @@ class ManagerTester(unittest.TestCase):
         self.session = orm.scoped_session(
             orm.sessionmaker(autoflush=True, autocommit=True, bind=engine))
         self.metadata = sa.MetaData(bind=self.session.bind)
+        from repoze.who.plugins.oauth import DefaultManager
+        self.manager = DefaultManager(self.session)
         global DBSession
         DBSession = self.session
 

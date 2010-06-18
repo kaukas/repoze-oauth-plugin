@@ -13,12 +13,12 @@ from .base import ManagerTester
 
 class BasePredicateTester(ManagerTester):
     """Base test case for predicates."""
-    
+
     def eval_met_predicate(self, p, environ):
         """Evaluate a predicate that should be met"""
         self.assertEqual(p.check_authorization(environ), None)
         self.assertEqual(p.is_met(environ), True)
-    
+
     def eval_unmet_predicate(self, p, environ, expected_error):
         """Evaluate a predicate that should not be met"""
         credentials = environ.get('repoze.what.credentials')
@@ -114,7 +114,7 @@ class TestNotOAuth(BasePredicateTester):
 
 class TestTokenAuthorization(BasePredicateTester):
 
-    def test_get_request(self):
+    def test_token_authorization(self):
         env = self._make_environ()
         p = token_authorization(self.session)
 
@@ -126,7 +126,7 @@ class TestTokenAuthorization(BasePredicateTester):
         self.eval_unmet_predicate(p, env, 'No valid matching OAuth token found')
         # There is no token in the environment
         self.assertFalse(env['oauth'].get('token'))
-        
+
         # Now create a consumer and the token and try again
         consumer = Consumer(key='some-consumer', secret='some-secret')
         token = RequestToken.create(consumer, session=self.session,
@@ -147,9 +147,15 @@ class TestTokenAuthorization(BasePredicateTester):
         self.eval_met_predicate(p, env)
         callback_maker = env['oauth']['make_callback']
         self.assertTrue(callback_maker)
-        
+
         # We must provide a request token key and a userid to authorize a
         # request callback
         callback = callback_maker('some-token', u'some-user')
         self.assertEquals(len(callback['verifier']), 6)
         self.assertTrue(callback['verifier'] in callback['url'])
+
+        # If the token callback url was provided as 'oob' (out of bounds) then
+        # the callback['url'] should also specify oob
+        token.callback = u'oob'
+        callback = callback_maker('some-token', u'some-user')
+        self.assertEquals(callback['url'], 'oob')

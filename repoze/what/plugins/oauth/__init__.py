@@ -85,8 +85,7 @@ class token_authorization(Predicate):
             - url - a URL to redirect to (suitable if a user agent is a browser)
             """
             token = self.manager.get_request_token(token_key)
-            token.userid = userid
-            token.generate_verifier()
+            token.set_userid(userid)
             self.DBSession.flush()
             return dict(
                 verifier=token.verifier,

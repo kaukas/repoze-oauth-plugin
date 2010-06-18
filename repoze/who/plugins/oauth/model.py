@@ -72,6 +72,11 @@ class RequestToken(_Base, Token):
         return cls._create_token(consumer.request_tokens, session=session,
             callback=callback, **kwargs)
 
+    def set_userid(self, userid):
+        self.userid = userid
+        if not self.verifier:
+            self.generate_verifier()
+
     def generate_verifier(self):
         self.verifier = gen_random_string(length=6,
             alphabet=ascii_lowercase + digits)
@@ -83,8 +88,6 @@ class RequestToken(_Base, Token):
         parsed_url = urlparse(self.callback)
         query = parse_qs(parsed_url.query)
         query['oauth_token'] = self.key
-        if not self.verifier:
-            self.generate_verifier()
         query['oauth_verifier'] = self.verifier
         parsed_url = list(parsed_url)
         parsed_url[4] = urlencode(query, True)
