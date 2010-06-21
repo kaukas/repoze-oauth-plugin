@@ -32,7 +32,7 @@ class Token(object):
     @classmethod
     def _create_token(cls, consumer_tokens, session=None, **kwargs):
         """Create a token and append it to the provided consumer token list.  If
-        session given and a token with this key exists a new random keys will be
+        session given and a token with this key exists new random keys will be
         tried until an unused key will be found
         """
         if not 'key' in kwargs:
@@ -57,40 +57,59 @@ class Token(object):
                     # A token with this key already exists. Generate a new key
                     token.key = gen_random_string(length=40)
                 else:
+                    # The token key is unique
                     success = True
         return token
 
 
 class RequestToken(_Base, Token):
-    r"""A request token representation in Database"""
+    r"""A request token representation in database"""
     __tablename__ = 'oauth_request_tokens'
 
     key = sa.Column(sa.types.String(40), primary_key=True)
     secret = sa.Column(sa.types.String(40), nullable=False)
     userid = sa.Column(sa.types.Unicode(200), nullable=True)
     verifier = sa.Column(sa.types.String(6))
+    # A url to redirect the user to after token verification. If no URL
+    # available then must be 'oob'
     callback = sa.Column(sa.types.Unicode(500))
     created = sa.Column(sa.types.DateTime(), default=datetime.now)
+    # The plugin does not set valid_till as it can vary or may not be used at
+    # all. The server app is responsible to set the value. The manager will
+    # check this value when looking for request tokens if valid_till is not NULL
     valid_till = sa.Column(sa.types.DateTime())
 
     @classmethod
     def create(cls, consumer, callback, session=None, **kwargs):
-        r"""Create a request token instance"""
+        r"""Create a request token instance and assign it to a consumer"""
+        # Ensure the callback is in unicode
         callback = unicode(callback)
         return cls._create_token(consumer.request_tokens, session=session,
             callback=callback, **kwargs)
 
     def set_userid(self, userid):
+        r"""Register the user id for this token and also generate a verification
+        code."""
         self.userid = userid
         if not self.verifier:
             self.generate_verifier()
 
     def generate_verifier(self):
+        r"""Use the gen_random_string to generate a 6 char string from lowercase
+        letters and digits. We are using lowercase letters only as the client
+        and/or server applications may decide to treat the verification code
+        case insensitive (for user convenience)
+        """
         self.verifier = gen_random_string(length=6,
             alphabet=ascii_lowercase + digits)
 
     @property
     def callback_url(self):
+        r"""Construct the callback url.
+        If the url is available then add the required parameters (oauth_token
+        and oauth_verifier) to it.
+        Otherwise return 'oob'
+        """
         if self.callback in ('oob', None):
             return 'oob'
         parsed_url = urlparse(self.callback)
@@ -103,16 +122,23 @@ class RequestToken(_Base, Token):
 
 
 class AccessToken(_Base, Token):
+    r"""An access token representation in database"""
     __tablename__ = 'oauth_access_tokens'
 
     key = sa.Column(sa.types.String(40), primary_key=True)
     secret = sa.Column(sa.types.String(40), nullable=False)
     userid = sa.Column(sa.types.Unicode(200), nullable=False)
     created = sa.Column(sa.types.DateTime(), default=datetime.now)
+    # The plugin does not set valid_till as it can vary or may not be used at
+    # all. The server app is responsible to set the value. The manager will
+    # check this value when looking for request tokens if valid_till is not NULL
     valid_till = sa.Column(sa.types.DateTime())
 
     @classmethod
     def create(cls, consumer, userid, session=None, **kwargs):
+        r"""Create an access token instance and assign it to the consumer and
+        user
+        """
         return cls._create_token(consumer.access_tokens, userid=userid,
             session=session, **kwargs)
 
