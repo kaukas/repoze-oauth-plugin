@@ -6,7 +6,8 @@
 *~
 /bin/
 /build/
-/repoze_oauth_plugin.egg-info/
 /dist/
+/doc/.build/
 /include/
 /lib/
+/repoze_oauth_plugin.egg-info/
