@@ -5,8 +5,9 @@ from repoze.who.plugins.oauth import DefaultManager
 
 
 class is_consumer(Predicate):
-    r"""A predicate that checks that the current user is a consumer acting on
-    behalf of itself.
+    r"""A predicate to check that the current user is a consumer acting on
+    behalf of itself. Note that the consumer key is *not* verified to match any
+    existing consumer.
     """
     message = u'The current user must be a consumer'
 
@@ -39,17 +40,43 @@ class is_consumer(Predicate):
             self.unmet()
 
 
-# Reserved for 3 legs
-#class is_oauth_user(Predicate):
-#    message = u'The current user must be a consumer acting on behalf of a user'
-#
-#    def __init__(self, user_name=None, consumer_key=None, *args, **kargs):
-#        Predicate.__init__(self, *args, **kargs)
-#        self.user_name = user_name
-#        self.consumer_key = consumer_key
-#
-#    def evaluate(self, environ, credentials):
-#        pass
+class is_oauth_user(Predicate):
+    r"""A predicate to check that the current user is a consumer acting on
+    behalf of a resource owner. Note that the userid and the consumer key are
+    *not* verified to match any existing user or consumer, only their existance
+    is verified.
+    """
+    message = u'The current user must be a consumer acting on behalf of a user'
+
+    def __init__(self, userid=None, consumer_key=None, *args, **kargs):
+        Predicate.__init__(self, *args, **kargs)
+        self.userid = userid
+        self.consumer_key = consumer_key
+
+    def evaluate(self, environ, credentials):
+        r"""Perform the actual evaluation"""
+        # Take userid from credentials
+        userid = credentials.get('repoze.what.userid')
+        if not userid:
+            # Not found
+            self.unmet()
+
+        # If we want a particular user check it
+        if self.userid is not None and userid != self.userid:
+            self.unmet()
+
+        # Take consumer key from identity
+        consumerkey = environ.get('repoze.who.identity',
+            {}).get('repoze.who.consumerkey')
+
+        # Consumer key must exist
+        if not consumerkey:
+            self.unmet()
+
+        # If we want a particular consumer the consumerkey must match it
+        if self.consumer_key is not None and consumerkey != self.consumer_key:
+            self.unmet()
+
 
 class not_oauth(Predicate):
     r"""A predicate that checks that the resource is being accessed not through

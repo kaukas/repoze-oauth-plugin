@@ -2,7 +2,7 @@ from urllib import urlencode
 
 from repoze.what import predicates
 
-from repoze.what.plugins.oauth import (is_consumer, not_oauth,
+from repoze.what.plugins.oauth import (is_consumer, is_oauth_user, not_oauth,
     token_authorization)
 from repoze.who.plugins.oauth import DefaultManager, Consumer, RequestToken
 
@@ -94,6 +94,64 @@ class TestIsConsumer(BasePredicateTester):
         # But not some other
         p = is_consumer('Some Other Consumer')
         self.eval_unmet_predicate(p, env, 'The current user must be a consumer')
+
+
+class TestIsOAuthUser(BasePredicateTester):
+    r"""Tests for is_oauth_user predicate"""
+
+    def test_without_credentials(self):
+        r"""Test how is_oauth_user behaves without credentials"""
+        env = self._make_environ()
+        p = is_oauth_user()
+        self.eval_unmet_predicate(p, env, 'The current user must be a ' \
+            'consumer acting on behalf of a user')
+
+    def test_with_credentials(self):
+        r"""Test how is_oauth_user handles credentials"""
+        env = self._make_environ()
+        error_msg = 'The current user must be a consumer acting on behalf of ' \
+            'a user'
+        # The user is assumed to be coming through OAuth if
+        #   repoze.what.credentials - repoze.what.userid holds a userid
+        #   repoze.who.identity - repoze.who.consumerkey holds a valid consumer
+        #       key and a valid access token exists for user and consumer
+        # Note that validity of userid is not checked!
+        # First try the userid only
+        env['repoze.what.credentials']['repoze.what.userid'] = 'Some User'
+        p = is_oauth_user()
+        self.eval_unmet_predicate(p, env, error_msg)
+
+        # Then try the consumer key only
+        del env['repoze.what.credentials']['repoze.what.userid']
+        env['repoze.who.identity']['repoze.who.consumerkey'] = 'Some Consumer'
+        self.eval_unmet_predicate(p, env, error_msg)
+
+        # Now try both
+        env['repoze.what.credentials']['repoze.what.userid'] = 'Some User'
+        # And all is ok now
+        self.eval_met_predicate(p, env)
+
+        # We can ask for a particular user
+        p = is_oauth_user(userid='Some User')
+        self.eval_met_predicate(p, env)
+        p = is_oauth_user(userid='Some Other User')
+        self.eval_unmet_predicate(p, env, error_msg)
+
+        # We can ask for a particular consumer
+        p = is_oauth_user(consumer_key='Some Consumer')
+        self.eval_met_predicate(p, env)
+        p = is_oauth_user(consumer_key='Some Other Consumer')
+        self.eval_unmet_predicate(p, env, error_msg)
+
+        # Or both
+        p = is_oauth_user(userid='Some User', consumer_key='Some Consumer')
+        self.eval_met_predicate(p, env)
+        p = is_oauth_user(userid='Some Other User',
+            consumer_key='Some Consumer')
+        self.eval_unmet_predicate(p, env, error_msg)
+        p = is_oauth_user(userid='Some User',
+            consumer_key='Some Other Consumer')
+        self.eval_unmet_predicate(p, env, error_msg)
 
 
 class TestNotOAuth(BasePredicateTester):
