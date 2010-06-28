@@ -57,7 +57,7 @@ class is_oauth_user(Predicate):
         r"""Perform the actual evaluation"""
         # Take userid from credentials
         userid = credentials.get('repoze.what.userid')
-        if not userid:
+        if not userid or userid.startswith('consumer:'):
             # Not found
             self.unmet()
 

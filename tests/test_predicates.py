@@ -153,6 +153,13 @@ class TestIsOAuthUser(BasePredicateTester):
             consumer_key='Some Other Consumer')
         self.eval_unmet_predicate(p, env, error_msg)
 
+        # Consumers as users are not accepted (only 3-legged flows, please)
+        p = is_oauth_user()
+        env['repoze.what.credentials']['repoze.what.userid'] = \
+            'consumer:Some User'
+        env['repoze.who.identity']['repoze.who.consumerkey'] = 'Some Consumer'
+        self.eval_unmet_predicate(p, env, error_msg)
+
 
 class TestNotOAuth(BasePredicateTester):
     r"""Tests for not_oauth predicate"""
