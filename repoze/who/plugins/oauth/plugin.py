@@ -19,10 +19,9 @@ class OAuthPlugin(object):
     http://pypi.python.org/pypi/oauth2.
 
     For initialization it takes:
-    - DBSession - an SQLAlchemy session bound to a valid engine. May be given as
-      an entry point.
-    - Manager - (optional) a customer and token manager. Must take a DBSession
-      as an initialization parameter. May be given as an entry point. Default -
+    - engine - an SQLAlchemy database engine or a engine url.
+    - Manager - (optional) a customer and token manager. Must take the engine as
+      an initialization parameter. May be given as an entry point. Default -
       repoze.who.plugins.oauth.DefaultManager.
     - realm - (optional) a realm name to denote the OAuth protected area.
     - url_request_token - (optional) a url to serve request tokens. Default
@@ -34,7 +33,7 @@ class OAuthPlugin(object):
     # This plugin is an identifier, authenticator and challenger
     implements(IIdentifier, IAuthenticator, IChallenger)
 
-    def __init__(self, DBSession,
+    def __init__(self, engine,
             Manager=DefaultManager,
             realm='',
             url_request_token='/oauth/request_token',
@@ -53,14 +52,10 @@ class OAuthPlugin(object):
             request=url_request_token,
             access=url_access_token)
 
-        # Allow session to be provided as an entry point from config
-        if isinstance(DBSession, (str, unicode)):
-            DBSession = _resolve(DBSession)
-
         # Allow manager to be provided as an entry point from config
         if isinstance(Manager, (str, unicode)):
             Manager = _resolve(Manager)
-        self.manager = Manager(DBSession)
+        self.manager = Manager(engine)
 
 
     def _parse_params(self, environ):

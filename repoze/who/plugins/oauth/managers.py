@@ -16,10 +16,17 @@ class DefaultManager(object):
     RequestToken = RequestToken
     AccessToken = AccessToken
 
-    def __init__(self, DBSession):
+    def __init__(self, engine):
+        if isinstance(engine, (str, unicode)):
+            engine = sa.create_engine(engine)
+
+        # Create a scoped session for database record management. It has
+        # autocommit set which basically means all changes are committed on
+        # flush
+        self.DBSession = orm.scoped_session(
+            orm.sessionmaker(autoflush=False, autocommit=True, bind=engine))
         # Create a metadata
-        self.metadata = sa.MetaData(bind=DBSession.bind)
-        self.DBSession = DBSession
+        self.metadata = sa.MetaData(bind=engine)
 
         # Assign the metadata to the tables
         self.Consumer.metadata = self.metadata
@@ -123,4 +130,17 @@ class DefaultManager(object):
             tokens = tokens.filter((self.AccessToken.valid_till == None) |
                 (self.AccessToken.valid_till <= now))
         token = tokens.first()
+        return token
+
+    def set_request_token_user(self, key, userid):
+        r"""Register the user id for this token and also generate a verification
+        code."""
+        token = self.get_request_token(key)
+        if not token:
+            return
+
+        token.userid = userid
+        if not token.verifier:
+            token.generate_verifier()
+        self.DBSession.flush()
         return token

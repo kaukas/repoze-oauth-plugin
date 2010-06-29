@@ -49,8 +49,7 @@ class Token(object):
         # in case such a key already exists. In that case re-generate the key
         # and try again.
         if session:
-            success = False
-            while not success:
+            while True:
                 try:
                     session.flush()
                 except (sa.exc.IntegrityError, sa.exc.FlushError):
@@ -58,7 +57,7 @@ class Token(object):
                     token.key = gen_random_string(length=40)
                 else:
                     # The token key is unique
-                    success = True
+                    break
         return token
 
 
@@ -87,18 +86,11 @@ class RequestToken(_Base, Token):
         return cls._create_token(consumer.request_tokens, session=session,
             callback=callback, **kwargs)
 
-    def set_userid(self, userid):
-        r"""Register the user id for this token and also generate a verification
-        code."""
-        self.userid = userid
-        if not self.verifier:
-            self.generate_verifier()
-
     def generate_verifier(self):
         r"""Use the gen_random_string to generate a 6 char string from lowercase
-        letters and digits. We are using lowercase letters only as the client
-        and/or server applications may decide to treat the verification code
-        case insensitive (for user convenience)
+        letters and digits. We are using lowercase letters only because the
+        client and/or server applications may decide to treat the verification
+        code as being case insensitive (for user convenience)
         """
         self.verifier = gen_random_string(length=6,
             alphabet=ascii_lowercase + digits)

@@ -11,7 +11,7 @@ class TestOAuthDefaultManager(ManagerTester):
         r"""Test how the manager finds consumers by keys"""
         # Create the manager
         from repoze.who.plugins.oauth import DefaultManager, Consumer
-        manager = DefaultManager(DBSession=self.session)
+        manager = DefaultManager(engine=self.engine)
 
         # Consumer exists not
         self.assertEquals(manager.get_consumer_by_key('abcd'), None)
@@ -22,7 +22,7 @@ class TestOAuthDefaultManager(ManagerTester):
         self.session.flush()
 
         # Consumer exists
-        self.assertEquals(manager.get_consumer_by_key('abcd'), consumer)
+        self.assertEquals(manager.get_consumer_by_key('abcd').key, consumer.key)
         # Consumer exists not
         self.assertEquals(manager.get_consumer_by_key('abdc'), None)
 
@@ -44,7 +44,7 @@ class TestOAuthDefaultManager(ManagerTester):
             ])
 
             # The default manager creates the tables and sets up relationships
-            manager = Manager(DBSession=self.session)
+            manager = Manager(engine=self.engine)
             # Check that relationships were established properly
             self.assertTrue(hasattr(RequestToken, 'consumer_key'))
             self.assertTrue(hasattr(Consumer, 'request_tokens'))
@@ -175,7 +175,7 @@ class TestOAuthDefaultManager(ManagerTester):
         r"""Test token creation at the model level (not manager actually)"""
         from repoze.who.plugins.oauth import (DefaultManager, Consumer,
             RequestToken, AccessToken)
-        manager = DefaultManager(DBSession=self.session)
+        manager = DefaultManager(engine=self.engine)
 
         # Create a consumer and a request token
         cons1 = Consumer(key='consumer1', secret='secret1')

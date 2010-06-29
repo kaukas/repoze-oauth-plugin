@@ -35,11 +35,6 @@ class TestOAuthPlugin(ManagerTester):
             Manager='repoze.who.plugins.oauth:DefaultManager')
         self.assertTrue(isinstance(plugin.manager, DefaultManager))
 
-        # The global DBSession from tests.base is used to check session class
-        # loaded through an entry point
-        plugin = self._makeOne(DBSession='tests.base:DBSession')
-        self.assertEquals(plugin.manager.DBSession, self.session)
-
         # Check how the plugin represents itself
         self.assertTrue(str(plugin).startswith('<OAuthPlugin '))
 
@@ -231,16 +226,18 @@ class TestOAuthPlugin(ManagerTester):
 
     def test_get_consumer(self):
         r"""Check how consumer is fetched from the database"""
+        plugin = self._makeOne()
+        manager = plugin.manager
+
         # Ensure we are clean
         from repoze.who.plugins.oauth import Consumer
         self.assertEquals(len(list(self.session.query(Consumer))), 0)
 
         # Create a consumer in the DB
         consumer = Consumer(key=u'some-consumer', secret='some-secret')
-        self.session.add(consumer)
-        self.session.flush()
+        manager.DBSession.add(consumer)
+        manager.DBSession.flush()
 
-        plugin = self._makeOne()
         # Provide the right consumer key and expect if to be found
         env = dict(environ={}, identity={
             'oauth_consumer_key': 'some-consumer'
@@ -265,25 +262,26 @@ class TestOAuthPlugin(ManagerTester):
         self.assertTrue(env['environ'].pop('repoze.who.application'))
 
         # Cleanup
-        self.session.delete(consumer)
-        self.session.flush()
+        manager.DBSession.delete(consumer)
+        manager.DBSession.flush()
 
 
     def test_get_request_token(self):
         r"""Test how request token is fetched from the database"""
+        plugin = self._makeOne()
+        manager = plugin.manager
+
         # Ensure we are clean
         from repoze.who.plugins.oauth import Consumer
         self.assertEquals(len(list(self.session.query(Consumer))), 0)
 
         # Create a consumer in the DB
         consumer = Consumer(key=u'some-consumer', secret='some-secret')
-        self.session.add(consumer)
+        manager.DBSession.add(consumer)
         # Create a token and verify it for some-user
-        rtoken = self.manager.create_request_token(consumer, 'http://test.com')
-        rtoken.set_userid(u'some-user')
-        self.session.flush()
+        rtoken = manager.create_request_token(consumer, 'http://test.com')
+        rtoken = manager.set_request_token_user(rtoken.key, u'some-user')
 
-        plugin = self._makeOne()
         # Token key and verification code provided - token found
         env = dict(environ={}, identity={
             'oauth_token': rtoken.key,
@@ -325,27 +323,29 @@ class TestOAuthPlugin(ManagerTester):
         self.assertTrue('repoze.who.application' in env['environ'])
 
         # Cleanup
-        self.session.delete(consumer)
-        self.session.flush()
+        manager.DBSession.delete(consumer)
+        manager.DBSession.flush()
 
 
     def test_get_access_token(self):
         r"""Test how access token is fetched from the database"""
+        plugin = self._makeOne()
+        manager = plugin.manager
+
         # Ensure we are clean
         from repoze.who.plugins.oauth import Consumer
         self.assertEquals(len(list(self.session.query(Consumer))), 0)
 
         # Create a consumer in the DB
         consumer = Consumer(key=u'some-consumer', secret='some-secret')
-        self.session.add(consumer)
+        manager.DBSession.add(consumer)
         # Create a request token and verify it for some-user. The request token
         # is needed in order to create an access token
-        rtoken = self.manager.create_request_token(consumer, 'http://test.com')
-        rtoken.set_userid(u'some-user')
+        rtoken = manager.create_request_token(consumer, 'http://test.com')
+        rtoken = manager.set_request_token_user(rtoken.key, u'some-user')
         # Now create the access token in the db
-        atoken = self.manager.create_access_token(rtoken)
+        atoken = manager.create_access_token(rtoken)
 
-        plugin = self._makeOne()
         # Provide an access token key - found
         env = dict(environ={}, consumer=consumer, identity={
             'oauth_token': atoken.key
@@ -370,8 +370,8 @@ class TestOAuthPlugin(ManagerTester):
         self.assertTrue(env['environ'].pop('repoze.who.application'))
 
         # Cleanup
-        self.session.delete(consumer)
-        self.session.flush()
+        manager.DBSession.delete(consumer)
+        manager.DBSession.flush()
 
 
     def test_verify_request(self):
@@ -528,19 +528,22 @@ class TestOAuthPlugin(ManagerTester):
 
     def test_access_token_app(self):
         r"""Test the application that creates the request token"""
+        plugin = self._makeOne()
+
         # Ensure we are clean
         from repoze.who.plugins.oauth import Consumer, AccessToken
         self.assertEquals(len(list(self.session.query(Consumer))), 0)
         # Create a consumer in the DB
         consumer = Consumer(key=u'some-consumer', secret='some-secret')
-        self.session.add(consumer)
+        manager = plugin.manager
+        manager.DBSession.add(consumer)
+        manager.DBSession.flush()
 
         # Create a request token and verify it for some-user. The request token
         # is needed in order to create an access token
-        rtoken = self.manager.create_request_token(consumer, 'oob')
-        rtoken.set_userid(u'some-user')
+        rtoken = manager.create_request_token(consumer, 'oob')
+        rtoken = manager.set_request_token_user(rtoken.key, u'some-user')
 
-        plugin = self._makeOne()
         # The function needs nothing but the request token. And it does nothing
         # but assign the access token creation app to the environ
         env = dict(environ={}, token=rtoken, identity={})
@@ -560,8 +563,8 @@ class TestOAuthPlugin(ManagerTester):
         self.assertEquals(dec_token['oauth_token_secret'][0], token.secret)
 
         # Cleanup
-        self.session.delete(consumer)
-        self.session.flush()
+        manager.DBSession.delete(consumer)
+        manager.DBSession.flush()
 
 
     def test_2_legged_flow(self):
@@ -719,7 +722,7 @@ class TestOAuthPlugin(ManagerTester):
         # custom one.
         self.assertEquals(userid, 'consumer:%s' % consumer.key)
         app = environ['repoze.who.application']
-        def assertUrlEncoded(code, headers):
+        def assertUrlEncoded(code, headers, *args):
             self.assertEquals(dict(headers)['Content-Type'],
                 'application/x-www-form-urlencoded')
         # The custom app will return a new request token for this consumer
@@ -756,7 +759,7 @@ class TestOAuthPlugin(ManagerTester):
         # The token_authorization predicate is supposed to protect the token
         # authorization method
         from repoze.what.plugins.oauth import token_authorization
-        authorizer = token_authorization(self.session)
+        authorizer = token_authorization(self.engine)
         authorizer.check_authorization(environ)
         # environ now stores the same token taken from the DB. And we can use
         # the information associated with that token
@@ -805,8 +808,10 @@ class TestOAuthPlugin(ManagerTester):
         }
         env_params.update(std_env_params)
         environ = self._makeEnviron(env_params)
+        # Force manager to reload all the objects as they might be out of date
+        plugin.manager.DBSession.expire_all()
         # As we are providing a request token and a verifier we should get an
-        # access token in exchange
+        # access token in exchange.
         identity = plugin.identify(environ)
         self.assertEquals(plugin.authenticate(environ, identity), None)
 

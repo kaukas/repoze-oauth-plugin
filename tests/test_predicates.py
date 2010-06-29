@@ -4,7 +4,7 @@ from repoze.what import predicates
 
 from repoze.what.plugins.oauth import (is_consumer, is_oauth_user, not_oauth,
     token_authorization)
-from repoze.who.plugins.oauth import DefaultManager, Consumer, RequestToken
+from repoze.who.plugins.oauth import Consumer, RequestToken
 
 from .base import ManagerTester
 
@@ -198,7 +198,8 @@ class TestTokenAuthorization(BasePredicateTester):
     def test_token_authorization(self):
         r"""Test how token_authorization behaves in GET and POST requests"""
         env = self._make_environ()
-        p = token_authorization(self.session)
+        p = token_authorization(self.engine)
+        session = p.manager.DBSession
 
         # First try an empty environment
         self.eval_unmet_predicate(p, env, 'No valid matching OAuth token found')
@@ -211,11 +212,11 @@ class TestTokenAuthorization(BasePredicateTester):
 
         # Now create a consumer and the token and try again
         consumer = Consumer(key='some-consumer', secret='some-secret')
-        token = RequestToken.create(consumer, session=self.session,
+        token = RequestToken.create(consumer, session=session,
             key='some-token',
             callback=u'http://www.test.com/some/path?x=1&y=%20a')
-        self.session.add(consumer)
-        self.session.flush()
+        session.add(consumer)
+        session.flush()
         # This time we are passed through
         self.eval_met_predicate(p, env)
 

@@ -105,7 +105,7 @@ class token_authorization(Predicate):
 
     If the user GETs the protected action then token_authorization looks for
     oauth_token parameter in query string and fetches a token from database. In
-    your action you can find the token found under
+    your action you can find the token under
     environ['repoze.what.oauth']['token']. 401 is raised if token not found.
 
     When the user POSTs to the same protected action a token processing function
@@ -118,23 +118,21 @@ class token_authorization(Predicate):
     instruct the user to provide the verification code to the client
     application as needed.
 
-    token_authorization takes an SQLAlchemy database session and repoze.who oauth
-    manager as its initialization parameters.
+    token_authorization takes an SQLAlchemy engine (or engine uri string) and
+    repoze.who oauth manager as its initialization parameters.
     """
     message = u'No valid matching OAuth token found'
 
-    def __init__(self, DBSession, Manager=DefaultManager):
+    def __init__(self, engine, Manager=DefaultManager):
+        self.engine = engine
         self.Manager = Manager
-        self.DBSession = DBSession
 
     @property
     def manager(self):
-        # Create the manager late so that the session could be established
-        # meanwhile
         # If we have the manager cached then use it. Otherwise create it, cache
         # it and use it
         if not hasattr(self, '_manager'):
-            self._manager = self.Manager(self.DBSession)
+            self._manager = self.Manager(self.engine)
         return self._manager
 
     def _make_callback(self):
@@ -147,10 +145,7 @@ class token_authorization(Predicate):
               is not a browser)
             - url - a URL to redirect to (if the user agent is a browser)
             """
-            token = self.manager.get_request_token(token_key)
-            # Assigning a token to the userid also generates a verifier
-            token.set_userid(userid)
-            self.DBSession.flush()
+            token = self.manager.set_request_token_user(token_key, userid)
             return dict(
                 verifier=token.verifier,
                 url=token.callback_url,
