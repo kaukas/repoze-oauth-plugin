@@ -24,9 +24,9 @@ class OAuthPlugin(object):
       an initialization parameter. May be given as an entry point. Default -
       repoze.who.plugins.oauth.DefaultManager.
     - realm - (optional) a realm name to denote the OAuth protected area.
-    - url_request_token - (optional) a url to serve request tokens. Default
+    - request_token_path - (optional) a path to serve request tokens. Default
       - '/oauth/request_token'
-    - url_access_token - (optional) a url to serve access tokens. Default -
+    - access_token_path - (optional) a path to serve access tokens. Default -
       '/oauth/access_token'
     """
     
@@ -36,8 +36,8 @@ class OAuthPlugin(object):
     def __init__(self, engine,
             Manager=DefaultManager,
             realm='',
-            url_request_token='/oauth/request_token',
-            url_access_token='/oauth/access_token',
+            request_token_path='/oauth/request_token',
+            access_token_path='/oauth/access_token'
         ):
 
         self.realm = realm
@@ -47,10 +47,10 @@ class OAuthPlugin(object):
             'HMAC-SHA1': oauth2.SignatureMethod_HMAC_SHA1()
         })
 
-        # Remember the urls to serve the tokens on
-        self.urls = dict(
-            request=url_request_token,
-            access=url_access_token)
+        # Remember the paths to serve the tokens on
+        self.paths = dict(
+            request=request_token_path,
+            access=access_token_path)
 
         # Allow manager to be provided as an entry point from config
         if isinstance(Manager, (str, unicode)):
@@ -86,14 +86,6 @@ class OAuthPlugin(object):
         return None
 
 
-    def _set_unauth_app(self, environ):
-        r"""Cook an unauthorized application to indicate wrong parameters or
-        other invalid condition"""
-        # repoze will replace the downstream app with what we set in
-        # repoze.who.application. This is a standard way to replace the
-        # downstream app in IAuthenticators
-        environ['repoze.who.application'] = HTTPUnauthorized()
-
     def _detect_request_type(self, environ, identity):
         r"""Detect which request it is. It can be
         - non-oauth and we don't care about it then
@@ -104,11 +96,11 @@ class OAuthPlugin(object):
           pass through
         """
         path = environ['PATH_INFO']
-        if path == self.urls['request']:
-            if path == self.urls['access'] and 'oauth_token' in identity:
+        if path == self.paths['request']:
+            if path == self.paths['access'] and 'oauth_token' in identity:
                 return 'access-token'
             return 'request-token'
-        if path == self.urls['access']:
+        if path == self.paths['access']:
             return 'access-token'
         if identity and not filter(lambda k: not k.startswith('oauth_'),
             identity.keys()):
@@ -119,10 +111,7 @@ class OAuthPlugin(object):
 
     def _check_POST(self, env):
         r"""Token requests have to be POSTed. Check this"""
-        if env['environ']['REQUEST_METHOD'].upper() != 'POST':
-            self._set_unauth_app(env['environ'])
-            return False
-        return True
+        return env['environ']['REQUEST_METHOD'].upper() == 'POST'
 
     def _check_oauth_params(self, env):
         r"""Check that we have only oauth parameters. If not then maybe we got
@@ -132,7 +121,9 @@ class OAuthPlugin(object):
         invalid_oauth = lambda k: not k.startswith('oauth_') and \
             k.lower() != 'realm'
         if filter(invalid_oauth, env['identity'].keys()):
-            # There are keys not from oauth - probably not our credentials
+            # There are keys not from oauth - probably not our credentials yet.
+            # Just ignore and exit for now
+            env['throw_401'] = False
             return False
         return True
 
@@ -141,10 +132,7 @@ class OAuthPlugin(object):
         Request token request absolutely requires an oauth_callback parameter
         according to the updated OAuth spec. Die if it's not present.
         """
-        if not env['identity'].get('oauth_callback'):
-            self._set_unauth_app(env['environ'])
-            return False
-        return True
+        return env['identity'].get('oauth_callback')
 
     def _get_consumer(self, env):
         r"""Try to find a consumer according to the oauth_consumer_key
@@ -156,7 +144,6 @@ class OAuthPlugin(object):
             # Consumer found - remember it
             env['consumer'] = consumer
             return True
-        self._set_unauth_app(env['environ'])
         return False
 
     def _get_request_token(self, env):
@@ -170,7 +157,6 @@ class OAuthPlugin(object):
             # A matching token found - remember it
             env['token'] = token
             return True
-        self._set_unauth_app(env['environ'])
         return False
     
     def _get_access_token(self, env):
@@ -183,7 +169,6 @@ class OAuthPlugin(object):
             # A matching token found - remember it
             env['token'] = token
             return True
-        self._set_unauth_app(env['environ'])
         return False
     
     def _verify_request(self, env):
@@ -199,7 +184,6 @@ class OAuthPlugin(object):
             self.server.verify_request(req, env['consumer'], env.get('token'))
         except oauth2.Error, e:
             # Verification error
-            self._set_unauth_app(env['environ'])
             return False
         return True
 
@@ -282,6 +266,15 @@ class OAuthPlugin(object):
                 break
 
         if failed:
+            # One validator failed. The failed validator may prevent the 401 if
+            # it sets env['throw_401'] = False. If not then DIE!
+            throw_401 = env.get('throw_401', True)
+            if rtype in ('request-token', 'access-token') and throw_401:
+                # repoze will replace the downstream app with what we set in
+                # repoze.who.application. This is a standard way to replace the
+                # downstream app in IAuthenticators
+                environ['repoze.who.application'] = HTTPUnauthorized()
+
             return
 
         consumer = env.get('consumer')

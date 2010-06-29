@@ -172,10 +172,11 @@ class TestOAuthDefaultManager(ManagerTester):
 
 
     def test_token_creation(self):
-        r"""Test token creation at the model level (not manager actually)"""
+        r"""Test token creation at the model level (not manager actually). Use
+        an in-memory database"""
         from repoze.who.plugins.oauth import (DefaultManager, Consumer,
             RequestToken, AccessToken)
-        manager = DefaultManager(engine=self.engine)
+        manager = DefaultManager(engine='sqlite:///:memory:')
 
         # Create a consumer and a request token
         cons1 = Consumer(key='consumer1', secret='secret1')

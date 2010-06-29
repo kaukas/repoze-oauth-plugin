@@ -143,12 +143,12 @@ class TestOAuthPlugin(ManagerTester):
             'access-token')
 
 
-        # Now - for the special case when request and access token urls are the
+        # Now - for the special case when request and access token paths are the
         # same (and they can be - according to the spec)
-        plugin = self._makeOne(url_request_token='/token',
-            url_access_token='/token')
+        plugin = self._makeOne(request_token_path='/token',
+            access_token_path='/token')
 
-        # If we're hitting the token url without parameters
+        # If we're hitting the token path without parameters
         env = self._makeEnviron(std_env_params)
         env.update({'PATH_INFO': '/token'})
         ident = {}
@@ -169,18 +169,15 @@ class TestOAuthPlugin(ManagerTester):
             'REQUEST_METHOD': 'POST'
         })
         self.assertTrue(plugin._check_POST(env))
-        self.assertFalse('repoze.who.application' in env['environ'])
 
         # Case insensitive
         env['environ']['REQUEST_METHOD'] = 'post'
         self.assertTrue(plugin._check_POST(env))
-        self.assertFalse('repoze.who.application' in env['environ'])
 
         # A GET
         env['environ']['REQUEST_METHOD'] = 'GET'
         self.assertFalse(plugin._check_POST(env))
         # We get an Unauthorized app
-        self.assertTrue('repoze.who.application' in env['environ'])
 
 
     def test_check_oauth_params(self):
@@ -193,14 +190,17 @@ class TestOAuthPlugin(ManagerTester):
         # An oauth parameter - ok
         env['identity']['oauth_something'] = True
         self.assertTrue(plugin._check_oauth_params(env))
+        self.assertEquals(env.get('throw_401'), None)
 
         # realm is also a valid oauth parameter
         env['identity']['realm'] = 'MyRealm'
         self.assertTrue(plugin._check_oauth_params(env))
+        self.assertEquals(env.get('throw_401'), None)
 
         # Not an oauth parameter - die
         env['identity']['auth_something'] = True
         self.assertFalse(plugin._check_oauth_params(env))
+        self.assertEquals(env['throw_401'], False)
 
 
     def test_check_callback(self):
@@ -211,17 +211,14 @@ class TestOAuthPlugin(ManagerTester):
             'oauth_callback': 'some-callback'
         })
         self.assertTrue(plugin._check_callback(env))
-        self.assertFalse('repoze.who.application' in env['environ'])
 
         # Empty callback - bad
         env['identity']['oauth_callback'] = ''
         self.assertFalse(plugin._check_callback(env))
-        self.assertTrue(env['environ'].pop('repoze.who.application'))
 
         # No callback - bad
         del env['identity']['oauth_callback']
         self.assertFalse(plugin._check_callback(env))
-        self.assertTrue(env['environ'].pop('repoze.who.application'))
 
 
     def test_get_consumer(self):
@@ -243,23 +240,18 @@ class TestOAuthPlugin(ManagerTester):
             'oauth_consumer_key': 'some-consumer'
         })
         self.assertTrue(plugin._get_consumer(env))
-        self.assertFalse('repoze.who.application' in env['environ'])
 
         # Provide a non existing consumer key
         env['identity']['oauth_consumer_key'] = 'another-consumer'
         self.assertFalse(plugin._get_consumer(env))
-        # Unauthorized
-        self.assertTrue(env['environ'].pop('repoze.who.application'))
 
         # Provide an empty consumer key
         env['identity']['oauth_consumer_key'] = ''
         self.assertFalse(plugin._get_consumer(env))
-        self.assertTrue(env['environ'].pop('repoze.who.application'))
 
         # Provide no consumer key
         del env['identity']['oauth_consumer_key']
         self.assertFalse(plugin._get_consumer(env))
-        self.assertTrue(env['environ'].pop('repoze.who.application'))
 
         # Cleanup
         manager.DBSession.delete(consumer)
@@ -282,6 +274,11 @@ class TestOAuthPlugin(ManagerTester):
         rtoken = manager.create_request_token(consumer, 'http://test.com')
         rtoken = manager.set_request_token_user(rtoken.key, u'some-user')
 
+        # If we supply a non-existing key to set_request_token_user nothing
+        # happens and we get nothing back
+        self.assertEquals(
+            manager.set_request_token_user(rtoken.key[:-2], u'some-user'), None)
+
         # Token key and verification code provided - token found
         env = dict(environ={}, identity={
             'oauth_token': rtoken.key,
@@ -289,7 +286,6 @@ class TestOAuthPlugin(ManagerTester):
         })
         self.assertTrue(plugin._get_request_token(env))
         self.assertTrue(env.pop('token'))
-        self.assertFalse('repoze.who.application' in env['environ'])
 
         # A wrong verifier - not found
         env = dict(environ={}, identity={
@@ -298,7 +294,6 @@ class TestOAuthPlugin(ManagerTester):
         })
         self.assertFalse(plugin._get_request_token(env))
         self.assertFalse('token' in env)
-        self.assertTrue('repoze.who.application' in env['environ'])
 
         # No verifier - not found
         env = dict(environ={}, identity={
@@ -306,7 +301,6 @@ class TestOAuthPlugin(ManagerTester):
         })
         self.assertFalse(plugin._get_request_token(env))
         self.assertFalse('token' in env)
-        self.assertTrue('repoze.who.application' in env['environ'])
 
         # No token key - not found
         env = dict(environ={}, identity={
@@ -314,13 +308,11 @@ class TestOAuthPlugin(ManagerTester):
         })
         self.assertFalse(plugin._get_request_token(env))
         self.assertFalse('token' in env)
-        self.assertTrue('repoze.who.application' in env['environ'])
 
         # Empty dict - not found of course
         env = dict(environ={}, identity={})
         self.assertFalse(plugin._get_request_token(env))
         self.assertFalse('token' in env)
-        self.assertTrue('repoze.who.application' in env['environ'])
 
         # Cleanup
         manager.DBSession.delete(consumer)
@@ -353,7 +345,6 @@ class TestOAuthPlugin(ManagerTester):
         self.assertTrue(plugin._get_access_token(env))
         self.assertTrue(env.pop('token'))
         # Unauthorized
-        self.assertFalse('repoze.who.application' in env['environ'])
 
         # A non-existing token key - not found
         env = dict(environ={}, consumer=consumer, identity={
@@ -361,13 +352,11 @@ class TestOAuthPlugin(ManagerTester):
         })
         self.assertFalse(plugin._get_access_token(env))
         self.assertFalse('token' in env)
-        self.assertTrue(env['environ'].pop('repoze.who.application'))
 
         # An empty identity - not found
         env = dict(environ={}, consumer=consumer, identity={})
         self.assertFalse(plugin._get_access_token(env))
         self.assertFalse('token' in env)
-        self.assertTrue(env['environ'].pop('repoze.who.application'))
 
         # Cleanup
         manager.DBSession.delete(consumer)
@@ -402,7 +391,6 @@ class TestOAuthPlugin(ManagerTester):
         }, consumer=consumer, identity=req)
         # Request verification successful
         self.assertTrue(plugin._verify_request(env))
-        self.assertFalse('repoze.who.application' in env['environ'])
 
         # 2 legs - unsuccessful
         # The request signature includes various parameters. If we change them
@@ -410,39 +398,33 @@ class TestOAuthPlugin(ManagerTester):
         # Unmatching request method
         env['environ']['REQUEST_METHOD'] = 'POST'
         self.assertFalse(plugin._verify_request(env))
-        self.assertTrue(env['environ'].pop('repoze.who.application'))
         # Put the right request method back
         env['environ']['REQUEST_METHOD'] = 'GET'
 
         # Unmatching url scheme
         env['environ']['wsgi.url_scheme'] = 'https'
         self.assertFalse(plugin._verify_request(env))
-        self.assertTrue(env['environ'].pop('repoze.who.application'))
         # Put the right url scheme back
         env['environ']['wsgi.url_scheme'] = 'http'
 
         # Unmatching server name
         env['environ']['SERVER_NAME'] = 'www.example2.com'
         self.assertFalse(plugin._verify_request(env))
-        self.assertTrue(env['environ'].pop('repoze.who.application'))
         env['environ']['SERVER_NAME'] = 'www.example.com'
 
         # Unmatching path info
         env['environ']['PATH_INFO'] = '/other_app'
         self.assertFalse(plugin._verify_request(env))
-        self.assertTrue(env['environ'].pop('repoze.who.application'))
         env['environ']['PATH_INFO'] = '/app'
 
         # Wrong consumer key
         env['identity']['oauth_consumer_key'] = 'some-other-consumer'
         self.assertFalse(plugin._verify_request(env))
-        self.assertTrue(env['environ'].pop('repoze.who.application'))
         env['identity']['oauth_consumer_key'] = 'some-consumer'
 
         # Wrong consumer secret
         consumer.secret = 'another-secret'
         self.assertFalse(plugin._verify_request(env))
-        self.assertTrue(env['environ'].pop('repoze.who.application'))
         consumer.secret = 'some-secret'
 
         # Wrong signature
@@ -450,7 +432,6 @@ class TestOAuthPlugin(ManagerTester):
         # Switch first 20 signature chars with the last 20
         env['identity']['oauth_signature'] = signature[20:] + signature[:20]
         self.assertFalse(plugin._verify_request(env))
-        self.assertTrue(env['environ'].pop('repoze.who.application'))
         env['identity']['oauth_signature'] = signature
 
         # With request token - successful
@@ -471,19 +452,16 @@ class TestOAuthPlugin(ManagerTester):
             'PATH_INFO': '/app',
         }, consumer=consumer, token=rtoken, identity=req)
         self.assertTrue(plugin._verify_request(env))
-        self.assertFalse('repoze.who.application' in env['environ'])
 
         # With request token - unsuccessful
         # Unmatching token key
         env['identity']['oauth_token'] = 'another-token'
         self.assertFalse(plugin._verify_request(env))
-        self.assertTrue(env['environ'].pop('repoze.who.application'))
         env['identity']['oauth_token'] = 'some-token'
 
         # Unmatching token secret
         rtoken.secret = 'another-secret'
         self.assertFalse(plugin._verify_request(env))
-        self.assertTrue(env['environ'].pop('repoze.who.application'))
         rtoken.secret = 'some-secret'
 
 
@@ -679,7 +657,7 @@ class TestOAuthPlugin(ManagerTester):
         r"""Test a 2-legged flow end-to-end"""
         # The OAuth spec allows the access token to be the same as request
         # token. Let's try this here
-        plugin = self._makeOne(url_access_token='/oauth/request_token')
+        plugin = self._makeOne(access_token_path='/oauth/request_token')
         std_env_params = {
             'wsgi.url_scheme': 'http',
             'SERVER_NAME': 'www.example.com',
