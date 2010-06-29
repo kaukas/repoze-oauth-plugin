@@ -20,12 +20,12 @@ The repoze.who plugin is responsible for:
   created when clients POST to the specified URLs
 
 * request and access token management in the database - the plugin takes care
-  for token tables' creation in the database, looks for the tokens and verifies
+  for token tables' creation in the database, looks up the tokens and verifies
   them
 
 In the 2-legged flow it identifies and authenticates the client using the
 consumer key. In the 3-legged flow it creates request and access tokens. Request
-token authorization is left for :ref:`token_authorization` predicate.
+token authorization is left to :ref:`token_authorization` predicate.
 
 See :ref:`who-usage` for usage information.
 
@@ -33,13 +33,13 @@ repoze.what Plugin
 ------------------
 
 The repoze.who plugin needs help with request token verification. Request tokens
-have to be verified by users. It involves displaying the client information to
-the user and handling the verification form submission. The repoze.what plugin
-provides a :ref:`token_authorization` predicate to use in the form generation
-and handling.
+have to be verified by users. It usually involves displaying the client
+information to the user and handling the verification form submission. The
+repoze.what plugin provides a :ref:`token_authorization` predicate to use in the
+form generation and handling.
 
-There are two more predicates to differentiate OAuth usage: :ref:`is_consumer`
-and :ref:`not_oauth`.
+There are three more predicates to recognize OAuth usage: :ref:`is_consumer`,
+:ref:`is_oauth_user` and :ref:`not_oauth`.
 
 See :ref:`what-usage` for usage information.
 
@@ -54,7 +54,7 @@ repoze.who Plugin Usage
 You can create the plugin with::
 
     >>> from repoze.who.plugins.oauth import OAuthPlugin
-    >>> oauth_plugin = OAuthPlugin(DBSession=Session,
+    >>> oauth_plugin = OAuthPlugin(engine='sqlite:///:memory:',
     ...     Manager=MyManager,
     ...     realm='my-realm',
     ...     url_request_token='/request_token',
@@ -62,25 +62,27 @@ You can create the plugin with::
 
 where:
 
-``DBSession``
-    An SQLAlchemy Session bound to a valid engine. If you are configuring the
-    plugin through the PasteDeploy configuration file this can be an `entry
-    point`_, e.g. `myproject.model.meta:Session`.
+``engine``
+    An SQLAlchemy engine. If the provided object is not an engine itself then it
+    must be something that can be converted to an engine using
+    sqlalchemy.create_engine_, e.g. url or `URL instance`_.
 
 ``Manager`` `optional, default -` ``repoze.who.plugins.oauth:DefaultManager``
     A class responsible for client management in the database. The Manager has
-    to take the ``DBSession`` as an initialization parameter. Can be provided as
-    an entry point too.
+    to take the ``engine`` as an initialization parameter.
+
+    If you are configuring the plugin through the PasteDeploy configuration file
+    this can be an `entry point`_, e.g. `myproject.lib:MyManager`.
 
 ``realm`` `optional, default -` ``''``
     A realm identifying the protection space.
 
-``url_request_token`` `optional, default -` ``'/oauth/request_token'``
-    A URL that the clients should POST to receive a new request token.
+``request_token_path`` `optional, default -` ``'/oauth/request_token'``
+    A URL that the clients should POST to to receive a new request token.
 
-``url_access_token`` `optional, default -` ``'/oauth/access_token'``
-    A URL that the clients should POST to receive a new access token. This url
-    can be equal to ``url_access_token``. In that case request type is
+``access_token_path`` `optional, default -` ``'/oauth/access_token'``
+    A URL that the clients should POST to to receive a new access token. This
+    url can be equal to ``request_token_path``. In that case request type is
     determined by parameters.
 
 The repoze.who plugin acts as an Identifier_, Authenticator_ and Challenger_.
@@ -88,7 +90,7 @@ Therefore in order to get OAuth support you need to provide it as identifier,
 authenticator and challenger to the repoze.who middleware_, similar to this
 (here we create it using repoze.what provided helper)::
 
-    >>> oauth_plugin = OAuthPlugin(Session, realm='MyRealm')
+    >>> oauth_plugin = OAuthPlugin('sqlite:///:memory:', realm='MyRealm')
     >>> from repoze.what.middleware import setup_auth
     >>> app = setup_auth(my_app,
     ...     group_adapters=my_group_adapters,
@@ -101,7 +103,7 @@ authenticator and challenger to the repoze.who middleware_, similar to this
 However, usually you would use some higher level middleware maker. Let's take
 repoze.what-quickstart_ as an example::
 
-    >>> oauth_plugin = OAuthPlugin(Session, realm='MyRealm')
+    >>> oauth_plugin = OAuthPlugin('sqlite:///:memory:', realm='MyRealm')
     >>> from repoze.what.plugins.quickstart import setup_sql_auth
     >>> app = setup_sql_auth(app, User, Group, Permission, Session,
     ...     identifiers=[('oauth', oauth_plugin)],
@@ -130,13 +132,13 @@ token and generate a verification code.
 
 Here is the procedure for token authorization:
 
-#. After client app acquires a request token it redirects the user to the
+1. After client app acquires a request token it redirects the user to the
    service.
-#. The user then has to authorize the request token. So it GETs the
+2. The user then has to authorize the request token. So he GETs the
    authorization action.
-#. The action should provide information about the client and a form.
-#. POSTing the form should authorize the request token.
-#. If the client is a web application the user gets redirected back to the
+3. The action should provide information about the client and a form.
+4. POSTing the form should authorize the request token.
+5. If the client is a web application the user gets redirected back to the
    client. Otherwise the user has to provide the verification code to the
    client.
 
@@ -170,7 +172,7 @@ imaginary OAuth using webapp::
             # Step 4. The user POSTs the form. Take the token_key from the POST
             # parameters
             token_key = environ.POST['oauth_token']
-            # The userid lives in repoze identity
+            # The userid usually lives in repoze identity
             userid = environ['repoze.who.identity']['repoze.who.userid']
             # token_authorization stores a request verification and callback
             # maker function in the environment
@@ -194,7 +196,7 @@ imaginary OAuth using webapp::
 is_consumer
 ^^^^^^^^^^^
 
-``is_consumer()`` is a predicate that checks whether the current user is a
+``is_consumer`` is a predicate that checks whether the current user is a
 consumer acting on behalf of itself (2-legged flow)::
 
     >>> from repoze.what.plugins.oauth import is_consumer
@@ -208,13 +210,35 @@ You can ask for a consumer with a particular key::
 
     >>> p = is_consumer(consumer_key='my-app')
 
+This predicate will not allow consumers to pass in a 3-legged flow (use
+:ref:`is_oauth_user`).
+
+.. _is_oauth_user:
+
+is_oauth_user
+^^^^^^^^^^^^^
+
+``is_oauth_user`` is a predicate that checks whether the current user is a
+consumer acting on behalf of a user (3-legged flow)::
+
+    >>> from repoze.what.plugins.oauth import is_oauth_user
+    >>> p = is_oauth_user()
+    >>> p.check_authorization(environ)
+    Traceback (most recent call last):
+    ...
+    repoze.what.predicates.NotAuthorizedError: The current user must be a consumer acting on behalf of a user
+
+You can ask for a particular consumer and/or particular user::
+
+    >>> p = is_consumer(userid='some-user', consumer_key='my-app')
+
 .. _not_oauth:
 
 not_oauth
 ^^^^^^^^^
 
-``not_oauth()`` is a predicate that denies access through OAuth. All other
-methods are allowed (even anonymous!)::
+``not_oauth`` is a predicate that denies access through OAuth. All other methods
+are allowed (even anonymous!)::
 
     >>> from repoze.what.plugins.oauth import not_oauth
     >>> p = not_oauth()
@@ -224,6 +248,8 @@ methods are allowed (even anonymous!)::
     repoze.what.predicates.NotAuthorizedError: Access through OAuth forbidden
     >>> p.check_authorization({})   # Empty environ, no user - ok!
 
+.. _sqlalchemy.create_engine: http://www.sqlalchemy.org/docs/05/reference/sqlalchemy/connections.html?highlight=engine#sqlalchemy.create_engine 
+.. _URL instance: http://www.sqlalchemy.org/docs/05/reference/sqlalchemy/connections.html?highlight=engine#sqlalchemy.engine.url.URL 
 .. _entry point: http://peak.telecommunity.com/DevCenter/setuptools#entry-points 
 .. _Identifier: http://static.repoze.org/whodocs/narr.html#identifier-plugins 
 .. _Authenticator: http://static.repoze.org/whodocs/narr.html#authenticator-plugins 

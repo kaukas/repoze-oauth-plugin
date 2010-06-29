@@ -17,7 +17,7 @@ class DefaultManager(object):
     AccessToken = AccessToken
 
     def __init__(self, engine):
-        if isinstance(engine, (str, unicode)):
+        if not isinstance(engine, sa.engine.base.Engine):
             engine = sa.create_engine(engine)
 
         # Create a scoped session for database record management. It has
