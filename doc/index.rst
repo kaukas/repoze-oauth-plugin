@@ -31,10 +31,6 @@ Contents
 
    installation
    usage
-
-.. toctree::
-   :hidden:
-
    pylons_demo
 
 Indices and tables

@@ -69,7 +69,9 @@ where:
 
 ``Manager`` `optional, default -` ``repoze.who.plugins.oauth:DefaultManager``
     A class responsible for client management in the database. The Manager has
-    to take the ``engine`` as an initialization parameter.
+    to take the ``engine`` as an initialization parameter. You are encouraged to
+    override the DefaultManager to tweak the consumer and token tables,
+    relationships and logic.
 
     If you are configuring the plugin through the PasteDeploy configuration file
     this can be an `entry point`_, e.g. `myproject.lib:MyManager`.
